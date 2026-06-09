@@ -402,10 +402,14 @@ function Fold({ open, setOpen, icon, title, children }) {
 }
 
 /* ========================= Onglet COUPE DU MONDE ========================= */
+const formatFrDate = (iso) => {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "");
+};
 function ScoreInput({ value, onChange, live }) {
   return <input className={"wc-score" + (live ? " wc-score-live" : "")} inputMode="numeric" maxLength={2} value={value == null ? "" : value} placeholder="–" onChange={(e) => onChange(e.target.value)} />;
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveIds }) {
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveIds, matchMeta }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const played = GROUP_PAIRS.filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
@@ -432,8 +436,10 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveI
           const ta = POOL[group[x]], tb = POOL[group[y]];
           const done = r.hg != null && r.ag != null;
           const isLive = liveIds ? liveIds.has(id) : false;
+          const mm = matchMeta ? matchMeta[id] : null;
           const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
+            {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("TF1") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
               <span className="wc-mscore">{isLive && <span className="wc-live-tag">live</span>}<ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} live={isLive} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} live={isLive} /></span>
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
@@ -499,10 +505,10 @@ function WorldCupTab() {
   useEffect(() => {
     const fetchWcMatches = async () => {
       try {
-        const r = await fetch("/api/stats?source=matches&league=WC");
+        const r = await fetch("/api/stats?source=matches&league=WC&all=1");
         if (!r.ok) return;
         const d = await r.json();
-        setRawApiMatches(d.finished || []);
+        setRawApiMatches([...(d.finished || []), ...(d.upcoming || [])]);
       } catch {}
     };
     fetchWcMatches();
@@ -510,10 +516,10 @@ function WorldCupTab() {
     return () => clearInterval(iv);
   }, []);
 
-  const apiMapped = useMemo(() => {
-    const r = {};
+  const apiParsed = useMemo(() => {
+    const mapped = {}, meta = {};
+    const francePi = POOL.findIndex((t) => t.n === "France");
     for (const m of rawApiMatches) {
-      if (m.homeGoals == null || m.awayGoals == null) continue;
       const hFr = EN_TO_FR_NORM[normName(m.home)];
       const aFr = EN_TO_FR_NORM[normName(m.away)];
       if (!hFr || !aFr) continue;
@@ -523,16 +529,21 @@ function WorldCupTab() {
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi];
         for (const [x, y] of GROUP_PAIRS) {
-          if (g[x] === hIdx && g[y] === aIdx) {
-            r["G" + LETTERS[gi] + "-" + x + "-" + y] = { hg: m.homeGoals, ag: m.awayGoals };
-          } else if (g[x] === aIdx && g[y] === hIdx) {
-            r["G" + LETTERS[gi] + "-" + x + "-" + y] = { hg: m.awayGoals, ag: m.homeGoals };
+          let id = null, hg = null, ag = null;
+          if (g[x] === hIdx && g[y] === aIdx) { id = "G" + LETTERS[gi] + "-" + x + "-" + y; hg = m.homeGoals; ag = m.awayGoals; }
+          else if (g[x] === aIdx && g[y] === hIdx) { id = "G" + LETTERS[gi] + "-" + x + "-" + y; hg = m.awayGoals; ag = m.homeGoals; }
+          if (id) {
+            if (hg != null && ag != null) mapped[id] = { hg, ag };
+            const hasFrance = hIdx === francePi || aIdx === francePi;
+            meta[id] = { dateIso: m.date, channel: hasFrance ? "TF1 · beIN" : "beIN Sports" };
           }
         }
       }
     }
-    return r;
+    return { mapped, meta };
   }, [rawApiMatches, groups]);
+  const apiMapped = apiParsed.mapped;
+  const matchMeta = apiParsed.meta;
 
   const effectiveResults = useMemo(() => ({ ...apiMapped, ...results }), [apiMapped, results]);
   const liveIds = useMemo(() => new Set(Object.keys(apiMapped).filter((id) => !results[id])), [apiMapped, results]);
@@ -582,7 +593,7 @@ function WorldCupTab() {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi : classements, qualifications et probabilités se recalculent automatiquement. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onScore={onScore} liveIds={liveIds} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onScore={onScore} liveIds={liveIds} matchMeta={matchMeta} />)}
       </>) : (<>
         <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
         {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} />)}
@@ -913,17 +924,27 @@ function SquadsTab() {
   const [league, setLeague] = useState("WC");
   const [teams, setTeams] = useState([]);
   const [sel, setSel] = useState(0);
+  const [scorersMap, setScorersMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [updated, setUpdated] = useState(null);
   const load = async () => {
-    setLoading(true); setErr(null); setTeams([]);
+    setLoading(true); setErr(null); setTeams([]); setScorersMap({});
     try {
-      const r = await fetch("/api/stats?source=teams&league=" + league);
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
-      const d = await r.json();
+      const [tr, sr] = await Promise.all([
+        fetch("/api/stats?source=teams&league=" + league),
+        fetch("/api/stats?source=scorers&league=" + league),
+      ]);
+      if (!tr.ok) { const j = await tr.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + tr.status)); }
+      const d = await tr.json();
       if (!d.teams || !d.teams.length) throw new Error("Aucune équipe (compétition pas encore active ?)");
       setTeams(d.teams); setSel(0); setUpdated(new Date());
+      if (sr.ok) {
+        const sd = await sr.json();
+        const m = {};
+        (sd.players || []).forEach((p) => { m[p.name] = { goals: p.goals, assists: p.assists || 0, matches: p.matches }; });
+        setScorersMap(m);
+      }
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
@@ -945,11 +966,27 @@ function SquadsTab() {
       {team && team.squad.length > 0 && (
         <section className="pf-card">
           <div className="pf-result-head">{team.name} · {team.squad.length} joueurs</div>
-          <table className="wc-st sc-tbl"><thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th></tr></thead>
-            <tbody>{team.squad.map((p, i) => (
-              <tr key={i}><td className="wc-tn">{p.name}</td><td className="sc-team-c">{posFr(p.position)}</td><td className="sc-team-c">{p.nationality || "—"}</td><td>{age(p.dob)}</td></tr>))}</tbody>
+          <table className="wc-st sc-tbl">
+            <thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th>{Object.keys(scorersMap).length > 0 && <><th>B</th><th>PD</th><th>J</th></>}</tr></thead>
+            <tbody>{team.squad.sort((a, b) => {
+              const sa = scorersMap[a.name], sb = scorersMap[b.name];
+              return (sb ? sb.goals : 0) - (sa ? sa.goals : 0) || (sb ? sb.assists : 0) - (sa ? sa.assists : 0);
+            }).map((p, i) => {
+              const st = scorersMap[p.name];
+              return (<tr key={i}>
+                <td className="wc-tn">{p.name}</td>
+                <td className="sc-team-c">{posFr(p.position)}</td>
+                <td className="sc-team-c">{p.nationality || "—"}</td>
+                <td>{age(p.dob)}</td>
+                {Object.keys(scorersMap).length > 0 && (<>
+                  <td className="wc-pts">{st ? st.goals : 0}</td>
+                  <td>{st ? st.assists : "—"}</td>
+                  <td>{st ? st.matches : "—"}</td>
+                </>)}
+              </tr>);
+            })}</tbody>
           </table>
-          <div className="lv-meta">Source football-data.org (gratuit) : nom, poste, nationalité, âge. Compositions et blessures ne sont pas disponibles en gratuit.</div>
+          <div className="lv-meta">{Object.keys(scorersMap).length > 0 ? "B = buts · PD = passes déc. · J = matchs joués dans la compétition. Trié par buts." : "Source football-data.org : nom, poste, nationalité, âge."}</div>
         </section>)}
     </>
   );
@@ -1092,6 +1129,10 @@ const CSS = `
 .wc-score:focus{border-color:var(--cyan);}
 .wc-score-live{border-color:var(--lime);color:var(--lime);}
 .wc-live-tag{font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;letter-spacing:.5px;text-transform:uppercase;line-height:1.4;}
+.wc-mmeta{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.wc-mdate{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);}
+.wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
+.wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-mp{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);margin-top:5px;text-align:center;}
 .wc-mscores{display:flex;justify-content:center;gap:8px;margin-top:4px;flex-wrap:wrap;}
 .wc-sc{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);}

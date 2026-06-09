@@ -80,7 +80,7 @@ export default async function handler(req, res) {
     /* ---- BUTEURS / PASSEURS ---- */
     if (source === "scorers") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
-      const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/scorers?limit=40", { headers: H });
+      const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/scorers?limit=100", { headers: H });
       const j = await r.json();
       const players = (j.scorers || []).map((s) => ({
         name: s.player?.name,
@@ -188,9 +188,10 @@ export default async function handler(req, res) {
         // Cotes UNIQUEMENT si l'API les fournit (sinon null : non incluses dans le tier gratuit).
         odds: m.odds && typeof m.odds.homeWin === "number" ? { h: m.odds.homeWin, d: m.odds.draw, a: m.odds.awayWin } : null,
       });
-      const finished = all.filter((m) => m.status === "FINISHED").sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate)).slice(0, 12).map(map);
-      const upcoming = all.filter((m) => ["TIMED", "SCHEDULED"].includes(m.status)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate)).slice(0, 12).map(map);
-      return res.status(200).json({ source, league, updated: new Date().toISOString(), finished, upcoming });
+      const noLimit = req.query.all === "1";
+      const finished = all.filter((m) => m.status === "FINISHED").sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
+      const upcoming = all.filter((m) => ["TIMED", "SCHEDULED"].includes(m.status)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+      return res.status(200).json({ source, league, updated: new Date().toISOString(), finished: (noLimit ? finished : finished.slice(0, 12)).map(map), upcoming: (noLimit ? upcoming : upcoming.slice(0, 12)).map(map) });
     }
 
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
