@@ -102,21 +102,44 @@ function predict(home, away, neutral) {
   const attA = away.att * (1 + 0.08 * fa), defA = away.def * (1 - 0.05 * fa);
   let lh = BASE_GOALS * attH * defA, la = BASE_GOALS * attA * defH;
   if (!neutral) { lh *= HOME_MULT; la *= AWAY_MULT; }
-  let total = 0; const M = [];
-  for (let i = 0; i <= MAXG; i++) { M[i] = []; for (let j = 0; j <= MAXG; j++) { const p = poisson(i, lh) * poisson(j, la) * dcTau(i, j, lh, la); M[i][j] = p; total += p; } }
+  // Une seule distribution : produit de deux Poisson sur les buts attendus (xG).
+  // Tout (1/N/2, +2,5, BTTS, scores) en découle -> cohérent, sans biais 1-1.
   let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
   const scores = [];
+  let bH = { s: "", p: 0 }, bD = { s: "", p: 0 }, bA = { s: "", p: 0 };
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
-    const p = M[i][j] / total;
-    if (i > j) pH += p; else if (i === j) pD += p; else pA += p;
+    const p = poisson(i, lh) * poisson(j, la);
+    if (i > j) { pH += p; if (p > bH.p) bH = { s: i + "–" + j, p }; }
+    else if (i === j) { pD += p; if (p > bD.p) bD = { s: i + "–" + j, p }; }
+    else { pA += p; if (p > bA.p) bA = { s: i + "–" + j, p }; }
     if (i + j >= 3) over25 += p; if (i >= 1 && j >= 1) btts += p;
-    // Scorelines les plus probables : Poisson BRUT (sans la sur-pondération
-    // Dixon-Coles des scores nuls, qui faisait sortir 1-1 presque tout le temps).
-    if (i <= 6 && j <= 6) scores.push({ s: i + "–" + j, p: poisson(i, lh) * poisson(j, la) });
+    if (i <= 6 && j <= 6) scores.push({ s: i + "–" + j, p });
   }
+  const total = pH + pD + pA || 1;
+  pH /= total; pD /= total; pA /= total; over25 /= total; btts /= total;
+  scores.forEach((s) => (s.p /= total)); bH.p /= total; bD.p /= total; bA.p /= total;
   scores.sort((a, b) => b.p - a.p);
-  const topScores = scores.slice(0, 4);
-  return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores };
+  const topScores = scores.slice(0, 6);
+  return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores, topHome: bH, topDraw: bD, topAway: bA };
+}
+// Match à élimination directe : prolongation (30') puis tirs au but si nul après 90'.
+function predictKnockout(home, away) {
+  const base = predict(home, away, true);
+  const lhE = base.lh / 3, laE = base.la / 3; // ~30 min = 1/3 de match
+  let etA = 0, etB = 0, etD = 0;
+  for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
+    const p = poisson(i, lhE) * poisson(j, laE);
+    if (i > j) etA += p; else if (i < j) etB += p; else etD += p;
+  }
+  const denom = base.pH + base.pA || 1;
+  const penA = 0.5 * 0.6 + (base.pH / denom) * 0.4; // t.a.b. ~50/50, léger avantage au plus fort
+  const regA = base.pH, regB = base.pA, drawMass = base.pD;
+  const etAm = drawMass * etA, etBm = drawMass * etB, penMass = drawMass * etD;
+  const penAm = penMass * penA, penBm = penMass * (1 - penA);
+  return {
+    regA, regB, etA: etAm, etB: etBm, penA: penAm, penB: penBm,
+    advA: regA + etAm + penAm, advB: regB + etBm + penBm,
+  };
 }
 function twoWay(p) { const d = p.pH + p.pA || 1; return { a: p.pH + p.pD * p.pH / d, b: p.pA + p.pD * p.pA / d }; }
 function parseForm(s) { return s ? String(s).split(/[^WDL]+/).filter(Boolean).slice(-5) : []; }
@@ -202,15 +225,16 @@ function buildKnockout(eff, qualRanked, ko, results) {
     for (let k = 0; k < count; k++) {
       const [a, b] = ties[k] || [null, null];
       const id = name + "-" + k;
-      let prob = 0.5, winner = null, decided = false;
+      let prob = 0.5, winner = null, decided = false, kb = null;
       if (a != null && b != null) {
-        prob = twoWay(predict(eff[a], eff[b], true)).a;
+        kb = predictKnockout(eff[a], eff[b]);
+        prob = kb.advA;
         const m = ko[id], sc = results[id];
         if (m != null) { winner = m; decided = true; }
         else if (sc && sc.hg != null && sc.ag != null && sc.hg !== sc.ag) { winner = sc.hg > sc.ag ? a : b; decided = true; }
         else winner = prob >= 0.5 ? a : b;
       } else winner = a != null ? a : b;
-      out.ties.push({ id, a, b, prob, winner, decided });
+      out.ties.push({ id, a, b, prob, winner, decided, kb });
       winners.push(winner);
     }
     rounds.push(out);
@@ -294,7 +318,12 @@ function MatchTab() {
             <div key={i} className={"pf-scell" + (i === 0 ? " pf-scell-top" : "")}>
               <div className="pf-scell-s">{s.s}</div><div className="pf-scell-p">{pct(s.p)}%</div>
             </div>))}</div>
-          <div className="pf-scores-note">Au foot, les scores serrés (1-0, 1-1) restent les plus fréquents même quand « +2,5 buts » dépasse 50 % : la probabilité se répartit sur beaucoup de scores possibles.</div>
+          <div className="pf-byout">
+            <div className="pf-bo"><span className="pf-bo-k">Si victoire {short(home.n)}</span><span className="pf-bo-v pf-bo-h">{R.topHome.s} <i>{pct(R.topHome.p)}%</i></span></div>
+            <div className="pf-bo"><span className="pf-bo-k">Si match nul</span><span className="pf-bo-v">{R.topDraw.s} <i>{pct(R.topDraw.p)}%</i></span></div>
+            <div className="pf-bo"><span className="pf-bo-k">Si victoire {short(away.n)}</span><span className="pf-bo-v pf-bo-a">{R.topAway.s} <i>{pct(R.topAway.p)}%</i></span></div>
+          </div>
+          <div className="pf-scores-note">Tout est calculé à partir des buts attendus (xG) : 1/N/2, +2,5 buts et scores proviennent de la même distribution. Pour deux équipes proches, 1-0 / 1-1 restent les scores exacts les plus fréquents — c'est le foot réel ; le détail par issue ci-dessus fait ressortir les autres scores.</div>
         </section>
         <section className="pf-card pf-stats">
           <div className="pf-stat"><div className="pf-stat-k">Buts attendus (xG)</div><div className="pf-stat-v pf-accent">{R.lh.toFixed(2)} – {R.la.toFixed(2)}</div><div className="pf-stat-x">dom. – ext.</div></div>
@@ -386,14 +415,23 @@ function KnockoutTie({ tie, eff, onPick }) {
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
   const sel = (ti) => tie.winner === ti;
+  const kb = tie.kb;
+  let bd = null;
+  if (kb && A && B) {
+    const favA = kb.advA >= kb.advB, fav = favA ? A : B;
+    bd = { fav, advP: favA ? kb.advA : kb.advB, reg: favA ? kb.regA : kb.regB, et: favA ? kb.etA : kb.etB, pen: favA ? kb.penA : kb.penB };
+  }
   return (
     <div className="wc-tie">
-      <button className={"wc-side " + (sel(tie.a) ? "wc-win" : "") + (tie.decided && !sel(tie.a) ? " wc-out" : "")} onClick={() => A && onPick(tie.id, tie.a)} disabled={!A}>
-        <span className="wc-flag">{A ? A.f : "·"}</span><span className="wc-sn">{A ? short(A.n) : "—"}</span><span className="wc-sp">{A ? pa + "%" : ""}</span>
-      </button>
-      <button className={"wc-side " + (sel(tie.b) ? "wc-win" : "") + (tie.decided && !sel(tie.b) ? " wc-out" : "")} onClick={() => B && onPick(tie.id, tie.b)} disabled={!B}>
-        <span className="wc-flag">{B ? B.f : "·"}</span><span className="wc-sn">{B ? short(B.n) : "—"}</span><span className="wc-sp">{B ? pb + "%" : ""}</span>
-      </button>
+      <div className="wc-tie-sides">
+        <button className={"wc-side " + (sel(tie.a) ? "wc-win" : "") + (tie.decided && !sel(tie.a) ? " wc-out" : "")} onClick={() => A && onPick(tie.id, tie.a)} disabled={!A}>
+          <span className="wc-flag">{A ? A.f : "·"}</span><span className="wc-sn">{A ? short(A.n) : "—"}</span><span className="wc-sp">{A ? pa + "%" : ""}</span>
+        </button>
+        <button className={"wc-side " + (sel(tie.b) ? "wc-win" : "") + (tie.decided && !sel(tie.b) ? " wc-out" : "")} onClick={() => B && onPick(tie.id, tie.b)} disabled={!B}>
+          <span className="wc-flag">{B ? B.f : "·"}</span><span className="wc-sn">{B ? short(B.n) : "—"}</span><span className="wc-sp">{B ? pb + "%" : ""}</span>
+        </button>
+      </div>
+      {bd && !tie.decided && <div className="wc-kb">{short(bd.fav.n)} qualif. <b>{pct(bd.advP)}%</b> · 90′ {pct(bd.reg)}% · prol. {pct(bd.et)}% · t.a.b. {pct(bd.pen)}%</div>}
       <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.decided ? "réel" : "projeté"}</span>
     </div>
   );
@@ -863,7 +901,10 @@ const CSS = `
 .wc-sc b{color:#c4cbd4;font-weight:700;}
 .wc-sc-top{color:var(--lime);}.wc-sc-top b{color:var(--lime);}
 .wc-ties{padding:6px 13px 14px;display:flex;flex-direction:column;gap:8px;}
-.wc-tie{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.wc-tie{position:relative;display:flex;flex-direction:column;gap:6px;}
+.wc-tie-sides{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.wc-kb{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);text-align:center;}
+.wc-kb b{color:var(--cyan);}
 .wc-side{display:flex;align-items:center;gap:7px;background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer;color:var(--txt);text-align:left;}
 .wc-side:disabled{opacity:.4;}
 .wc-sn{flex:1;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -892,7 +933,13 @@ const CSS = `
 .sc-tbl td{font-size:12px;}
 .sc-team-c{font-family:'Saira'!important;color:var(--dim);font-size:11px;text-align:left!important;}
 /* scores probables */
-.pf-scores{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.pf-scores{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.pf-byout{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
+.pf-bo{display:flex;align-items:center;justify-content:space-between;background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:9px 12px;}
+.pf-bo-k{font-size:12.5px;color:var(--dim);}
+.pf-bo-v{font-family:'JetBrains Mono';font-weight:700;font-size:15px;}
+.pf-bo-v i{font-style:normal;font-size:11px;color:var(--dim);font-weight:500;margin-left:5px;}
+.pf-bo-h{color:var(--lime);}.pf-bo-a{color:var(--cyan);}
 .pf-scell{background:#0e1116;border:1px solid var(--line);border-radius:11px;padding:10px 4px;text-align:center;}
 .pf-scell-top{border-color:rgba(200,255,66,.4);}
 .pf-scell-s{font-family:'JetBrains Mono';font-weight:700;font-size:18px;}
