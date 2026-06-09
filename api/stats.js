@@ -1,15 +1,10 @@
-/* Proxy serverless Vercel : récupère les stats réelles d'un championnat,
- * calcule les forces att/def, et renvoie un JSON normalisé.
- * - garde la clé API secrète côté serveur (jamais exposée au navigateur)
- * - règle le CORS
- * - met en cache au bord (Vercel Edge) pour respecter les quotas gratuits
- *
- * Une seule requête API par appel : on lit le CLASSEMENT (standings), qui
- * contient déjà, pour chaque équipe, matchs joués + buts pour/contre.
- * => "temps réel" sûr : à chaque chargement on relit le classement courant,
- *    mais le cache limite à ~1 requête / 10 min vers le fournisseur.
+/* Proxy serverless Vercel — football-data.org (saison en cours, gratuit).
+ * Routes (paramètre ?source=) :
+ *   standings (défaut) : forces att/def d'un championnat (?league=CODE)
+ *   scorers            : meilleurs buteurs/passeurs (?league=CODE)
+ *   h2h                : dernières confrontations (?home=ID&away=ID)
+ * Garde le jeton secret, règle le CORS, met en cache au bord (quota-safe).
  */
-
 function ratings(matches, gf, ga, leagueAvg) {
   const fp = gf / matches, ap = ga / matches;
   const clamp = (x) => Math.max(0.6, Math.min(1.7, x));
@@ -17,62 +12,67 @@ function ratings(matches, gf, ga, leagueAvg) {
 }
 
 export default async function handler(req, res) {
-  const { source = "apifootball", league, season } = req.query;
+  const { source = "standings", league, home, away } = req.query;
+  const token = process.env.FOOTBALLDATA_TOKEN;
+  const H = { "X-Auth-Token": token || "" };
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
-  if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+  if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {
-    let rows = [];
-
-    if (source === "apifootball") {
-      const key = process.env.APIFOOTBALL_KEY;
-      if (!key) return res.status(500).json({ error: "APIFOOTBALL_KEY non configurée sur Vercel" });
-      const r = await fetch(
-        "https://v3.football.api-sports.io/standings?league=" + league + "&season=" + (season || ""),
-        { headers: { "x-apisports-key": key } }
-      );
+    /* ---- BUTEURS / PASSEURS ---- */
+    if (source === "scorers") {
+      if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+      const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/scorers?limit=40", { headers: H });
       const j = await r.json();
-      const table = j?.response?.[0]?.league?.standings?.[0] || [];
-      rows = table.map((row) => ({
-        name: row.team.name,
-        matches: row.all.played,
-        goalsFor: row.all.goals.for,
-        goalsAgainst: row.all.goals.against,
+      const players = (j.scorers || []).map((s) => ({
+        name: s.player?.name,
+        team: s.team?.name,
+        goals: s.goals || 0,
+        assists: s.assists || 0,
+        penalties: s.penalties || 0,
+        matches: s.playedMatches || 0,
       }));
-    } else if (source === "footballdata") {
-      const token = process.env.FOOTBALLDATA_TOKEN;
-      if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
-      // ici 'league' est un code : PL, FL1, PD, SA, BL1, CL...
-      const r = await fetch(
-        "https://api.football-data.org/v4/competitions/" + league + "/standings",
-        { headers: { "X-Auth-Token": token } }
-      );
-      const j = await r.json();
-      const table = (j.standings || []).find((s) => s.type === "TOTAL")?.table || [];
-      rows = table.map((row) => ({
-        name: row.team.name,
-        matches: row.playedGames,
-        goalsFor: row.goalsFor,
-        goalsAgainst: row.goalsAgainst,
-      }));
-    } else {
-      return res.status(400).json({ error: "source inconnue (apifootball | footballdata)" });
+      return res.status(200).json({ source, league, season: j.season?.startDate?.slice(0, 4), updated: new Date().toISOString(), players });
     }
 
-    rows = rows.filter((t) => t.matches > 0);
-    if (!rows.length) return res.status(200).json({ source, league, season, teams: [] });
+    /* ---- CONFRONTATIONS DIRECTES (H2H) ---- */
+    if (source === "h2h") {
+      if (!home || !away) return res.status(400).json({ error: "paramètres 'home' et 'away' requis" });
+      const r = await fetch("https://api.football-data.org/v4/teams/" + home + "/matches?status=FINISHED&limit=200", { headers: H });
+      const j = await r.json();
+      const meetings = (j.matches || [])
+        .filter((m) => String(m.homeTeam.id) === String(away) || String(m.awayTeam.id) === String(away))
+        .sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate))
+        .slice(0, 8)
+        .map((m) => ({
+          date: m.utcDate?.slice(0, 10),
+          competition: m.competition?.name,
+          homeTeam: m.homeTeam.name, awayTeam: m.awayTeam.name,
+          homeGoals: m.score?.fullTime?.home, awayGoals: m.score?.fullTime?.away,
+        }));
+      return res.status(200).json({ source, home, away, updated: new Date().toISOString(), meetings });
+    }
 
+    /* ---- CLASSEMENT -> FORCES (défaut) ---- */
+    if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+    const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/standings", { headers: H });
+    const j = await r.json();
+    const table = (j.standings || []).find((s) => s.type === "TOTAL")?.table || [];
+    let rows = table.map((row) => ({
+      id: row.team.id,
+      name: row.team.name,
+      crest: row.team.crest,
+      matches: row.playedGames,
+      goalsFor: row.goalsFor,
+      goalsAgainst: row.goalsAgainst,
+    })).filter((t) => t.matches > 0);
+    if (!rows.length) return res.status(200).json({ source: "standings", league, teams: [] });
     const totM = rows.reduce((s, t) => s + t.matches, 0);
     const totG = rows.reduce((s, t) => s + t.goalsFor, 0);
     const leagueAvg = totM ? totG / totM : 1.35;
-
-    const teams = rows.map((t) => {
-      const r = ratings(t.matches, t.goalsFor, t.goalsAgainst, leagueAvg);
-      return { ...t, att: r.att, def: r.def, basis: "buts" };
-    });
-
-    res.status(200).json({ source, league, season, leagueAvg, updated: new Date().toISOString(), teams });
+    const teams = rows.map((t) => { const rr = ratings(t.matches, t.goalsFor, t.goalsAgainst, leagueAvg); return { ...t, att: rr.att, def: rr.def }; });
+    res.status(200).json({ source: "standings", league, leagueAvg, updated: new Date().toISOString(), teams });
   } catch (e) {
     res.status(502).json({ error: String(e) });
   }

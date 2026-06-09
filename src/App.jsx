@@ -15,55 +15,74 @@ const BASE_GOALS = 1.35, HOME_MULT = 1.18, AWAY_MULT = 0.92, RHO = -0.13, MAXG =
 const LETTERS = "ABCDEFGHIJKL".split("");
 const GROUP_PAIRS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
 
+/* Les 48 équipes RÉELLEMENT qualifiées pour la Coupe du Monde 2026.
+ * Ratings att/def illustratifs (par niveau) ; ils se recalibrent dès que tu
+ * saisis de vrais scores ou via l'onglet Live. */
 const POOL = [
-  { n: "France", f: "🇫🇷", elo: 2085, att: 1.40, def: 0.72, form: ["W","W","D","W","L"] },
-  { n: "Argentine", f: "🇦🇷", elo: 2090, att: 1.38, def: 0.74, form: ["W","W","W","D","W"] },
-  { n: "Espagne", f: "🇪🇸", elo: 2070, att: 1.42, def: 0.78, form: ["W","D","W","W","W"] },
-  { n: "Brésil", f: "🇧🇷", elo: 2060, att: 1.40, def: 0.80, form: ["W","L","W","D","W"] },
-  { n: "Angleterre", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 2030, att: 1.34, def: 0.74, form: ["D","W","W","L","D"] },
-  { n: "Portugal", f: "🇵🇹", elo: 2025, att: 1.38, def: 0.82, form: ["W","W","D","W","D"] },
-  { n: "Pays-Bas", f: "🇳🇱", elo: 1985, att: 1.30, def: 0.85, form: ["W","D","L","W","W"] },
-  { n: "Allemagne", f: "🇩🇪", elo: 1980, att: 1.34, def: 0.88, form: ["L","W","W","D","W"] },
-  { n: "Italie", f: "🇮🇹", elo: 1975, att: 1.20, def: 0.74, form: ["D","W","D","W","L"] },
-  { n: "Belgique", f: "🇧🇪", elo: 1960, att: 1.30, def: 0.90, form: ["W","L","D","W","D"] },
-  { n: "Croatie", f: "🇭🇷", elo: 1945, att: 1.18, def: 0.86, form: ["D","D","W","L","W"] },
-  { n: "Uruguay", f: "🇺🇾", elo: 1935, att: 1.22, def: 0.84, form: ["W","D","W","L","D"] },
-  { n: "Maroc", f: "🇲🇦", elo: 1875, att: 1.12, def: 0.82, form: ["W","W","D","W","L"] },
-  { n: "Colombie", f: "🇨🇴", elo: 1855, att: 1.18, def: 0.88, form: ["W","D","L","W","D"] },
-  { n: "Danemark", f: "🇩🇰", elo: 1845, att: 1.16, def: 0.90, form: ["L","W","D","W","D"] },
-  { n: "Japon", f: "🇯🇵", elo: 1830, att: 1.16, def: 0.92, form: ["W","W","L","D","W"] },
-  { n: "Sénégal", f: "🇸🇳", elo: 1825, att: 1.14, def: 0.88, form: ["D","W","D","L","W"] },
-  { n: "Mexique", f: "🇲🇽", elo: 1815, att: 1.14, def: 0.96, form: ["L","D","W","D","L"] },
-  { n: "Suisse", f: "🇨🇭", elo: 1810, att: 1.10, def: 0.86, form: ["D","D","W","L","D"] },
-  { n: "États-Unis", f: "🇺🇸", elo: 1800, att: 1.12, def: 0.98, form: ["W","L","D","W","L"] },
-  { n: "Nigeria", f: "🇳🇬", elo: 1735, att: 1.12, def: 0.94, form: [] },
-  { n: "Corée du Sud", f: "🇰🇷", elo: 1725, att: 1.10, def: 0.96, form: [] },
-  { n: "Égypte", f: "🇪🇬", elo: 1710, att: 1.06, def: 0.92, form: [] },
-  { n: "Cameroun", f: "🇨🇲", elo: 1690, att: 1.08, def: 0.98, form: [] },
-  { n: "Canada", f: "🇨🇦", elo: 1685, att: 1.10, def: 1.00, form: [] },
-  { n: "Australie", f: "🇦🇺", elo: 1660, att: 1.04, def: 0.98, form: [] },
-  { n: "Serbie", f: "🇷🇸", elo: 1790, att: 1.18, def: 0.96, form: [] },
-  { n: "Autriche", f: "🇦🇹", elo: 1790, att: 1.14, def: 0.92, form: [] },
-  { n: "Turquie", f: "🇹🇷", elo: 1785, att: 1.16, def: 0.94, form: [] },
-  { n: "Norvège", f: "🇳🇴", elo: 1780, att: 1.20, def: 0.94, form: [] },
-  { n: "Équateur", f: "🇪🇨", elo: 1780, att: 1.10, def: 0.88, form: [] },
-  { n: "Ukraine", f: "🇺🇦", elo: 1770, att: 1.10, def: 0.92, form: [] },
-  { n: "Pologne", f: "🇵🇱", elo: 1755, att: 1.10, def: 0.94, form: [] },
-  { n: "Iran", f: "🇮🇷", elo: 1740, att: 1.06, def: 0.90, form: [] },
-  { n: "Écosse", f: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", elo: 1740, att: 1.06, def: 0.92, form: [] },
-  { n: "Pérou", f: "🇵🇪", elo: 1720, att: 1.04, def: 0.94, form: [] },
-  { n: "Algérie", f: "🇩🇿", elo: 1700, att: 1.10, def: 0.96, form: [] },
-  { n: "Paraguay", f: "🇵🇾", elo: 1700, att: 1.02, def: 0.96, form: [] },
-  { n: "Côte d'Ivoire", f: "🇨🇮", elo: 1690, att: 1.10, def: 0.98, form: [] },
-  { n: "Costa Rica", f: "🇨🇷", elo: 1660, att: 1.00, def: 0.98, form: [] },
-  { n: "Tunisie", f: "🇹🇳", elo: 1660, att: 1.02, def: 0.94, form: [] },
-  { n: "Ghana", f: "🇬🇭", elo: 1645, att: 1.06, def: 1.02, form: [] },
-  { n: "Jamaïque", f: "🇯🇲", elo: 1640, att: 1.04, def: 1.04, form: [] },
-  { n: "Arabie saoudite", f: "🇸🇦", elo: 1620, att: 0.98, def: 1.00, form: [] },
-  { n: "Panama", f: "🇵🇦", elo: 1610, att: 0.98, def: 1.02, form: [] },
-  { n: "Qatar", f: "🇶🇦", elo: 1600, att: 0.98, def: 1.02, form: [] },
-  { n: "Honduras", f: "🇭🇳", elo: 1590, att: 0.96, def: 1.04, form: [] },
-  { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.92, def: 1.06, form: [] },
+  { n: "Argentine", f: "🇦🇷", elo: 2090, att: 1.38, def: 0.74 },
+  { n: "France", f: "🇫🇷", elo: 2085, att: 1.40, def: 0.74 },
+  { n: "Espagne", f: "🇪🇸", elo: 2075, att: 1.42, def: 0.76 },
+  { n: "Brésil", f: "🇧🇷", elo: 2060, att: 1.40, def: 0.80 },
+  { n: "Angleterre", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 2035, att: 1.34, def: 0.74 },
+  { n: "Portugal", f: "🇵🇹", elo: 2030, att: 1.40, def: 0.82 },
+  { n: "Allemagne", f: "🇩🇪", elo: 1990, att: 1.34, def: 0.86 },
+  { n: "Pays-Bas", f: "🇳🇱", elo: 1985, att: 1.32, def: 0.84 },
+  { n: "Belgique", f: "🇧🇪", elo: 1955, att: 1.30, def: 0.90 },
+  { n: "Croatie", f: "🇭🇷", elo: 1940, att: 1.18, def: 0.86 },
+  { n: "Uruguay", f: "🇺🇾", elo: 1930, att: 1.22, def: 0.84 },
+  { n: "Colombie", f: "🇨🇴", elo: 1900, att: 1.20, def: 0.86 },
+  { n: "Maroc", f: "🇲🇦", elo: 1885, att: 1.16, def: 0.80 },
+  { n: "Norvège", f: "🇳🇴", elo: 1865, att: 1.30, def: 0.92 },
+  { n: "Sénégal", f: "🇸🇳", elo: 1850, att: 1.18, def: 0.84 },
+  { n: "Suisse", f: "🇨🇭", elo: 1840, att: 1.10, def: 0.86 },
+  { n: "Japon", f: "🇯🇵", elo: 1835, att: 1.20, def: 0.88 },
+  { n: "Autriche", f: "🇦🇹", elo: 1830, att: 1.18, def: 0.90 },
+  { n: "Équateur", f: "🇪🇨", elo: 1820, att: 1.10, def: 0.84 },
+  { n: "Turquie", f: "🇹🇷", elo: 1815, att: 1.20, def: 0.92 },
+  { n: "Mexique", f: "🇲🇽", elo: 1810, att: 1.16, def: 0.92 },
+  { n: "Tchéquie", f: "🇨🇿", elo: 1800, att: 1.14, def: 0.90 },
+  { n: "États-Unis", f: "🇺🇸", elo: 1800, att: 1.16, def: 0.92 },
+  { n: "Corée du Sud", f: "🇰🇷", elo: 1790, att: 1.14, def: 0.90 },
+  { n: "Suède", f: "🇸🇪", elo: 1785, att: 1.18, def: 0.92 },
+  { n: "Côte d'Ivoire", f: "🇨🇮", elo: 1775, att: 1.14, def: 0.90 },
+  { n: "Canada", f: "🇨🇦", elo: 1770, att: 1.14, def: 0.92 },
+  { n: "Algérie", f: "🇩🇿", elo: 1770, att: 1.16, def: 0.90 },
+  { n: "Iran", f: "🇮🇷", elo: 1760, att: 1.06, def: 0.86 },
+  { n: "Égypte", f: "🇪🇬", elo: 1760, att: 1.10, def: 0.90 },
+  { n: "Écosse", f: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", elo: 1760, att: 1.10, def: 0.90 },
+  { n: "RD Congo", f: "🇨🇩", elo: 1730, att: 1.14, def: 0.94 },
+  { n: "Ghana", f: "🇬🇭", elo: 1730, att: 1.12, def: 0.96 },
+  { n: "Paraguay", f: "🇵🇾", elo: 1740, att: 1.04, def: 0.92 },
+  { n: "Australie", f: "🇦🇺", elo: 1720, att: 1.04, def: 0.96 },
+  { n: "Afrique du Sud", f: "🇿🇦", elo: 1720, att: 1.08, def: 0.92 },
+  { n: "Bosnie-Herzégovine", f: "🇧🇦", elo: 1720, att: 1.12, def: 0.94 },
+  { n: "Tunisie", f: "🇹🇳", elo: 1710, att: 1.02, def: 0.90 },
+  { n: "Ouzbékistan", f: "🇺🇿", elo: 1680, att: 1.04, def: 0.94 },
+  { n: "Panama", f: "🇵🇦", elo: 1670, att: 1.02, def: 0.98 },
+  { n: "Qatar", f: "🇶🇦", elo: 1665, att: 0.98, def: 1.00 },
+  { n: "Arabie saoudite", f: "🇸🇦", elo: 1660, att: 0.98, def: 0.98 },
+  { n: "Jordanie", f: "🇯🇴", elo: 1660, att: 1.00, def: 0.94 },
+  { n: "Irak", f: "🇮🇶", elo: 1650, att: 0.98, def: 0.96 },
+  { n: "Cap-Vert", f: "🇨🇻", elo: 1640, att: 1.02, def: 0.98 },
+  { n: "Haïti", f: "🇭🇹", elo: 1600, att: 0.96, def: 1.02 },
+  { n: "Curaçao", f: "🇨🇼", elo: 1580, att: 0.92, def: 1.04 },
+  { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.92, def: 1.06 },
+];
+
+/* Tirage OFFICIEL de la Coupe du Monde 2026 (groupes A à L). */
+const GROUPS_2026 = [
+  ["Mexique", "Corée du Sud", "Afrique du Sud", "Tchéquie"],
+  ["Canada", "Suisse", "Qatar", "Bosnie-Herzégovine"],
+  ["Brésil", "Maroc", "Écosse", "Haïti"],
+  ["États-Unis", "Paraguay", "Australie", "Turquie"],
+  ["Allemagne", "Équateur", "Côte d'Ivoire", "Curaçao"],
+  ["Pays-Bas", "Japon", "Tunisie", "Suède"],
+  ["Belgique", "Iran", "Égypte", "Nouvelle-Zélande"],
+  ["Espagne", "Uruguay", "Arabie saoudite", "Cap-Vert"],
+  ["France", "Sénégal", "Norvège", "Irak"],
+  ["Argentine", "Autriche", "Algérie", "Jordanie"],
+  ["Portugal", "Colombie", "Ouzbékistan", "RD Congo"],
+  ["Angleterre", "Croatie", "Panama", "Ghana"],
 ];
 
 /* ---------- maths ---------- */
@@ -85,17 +104,19 @@ function predict(home, away, neutral) {
   if (!neutral) { lh *= HOME_MULT; la *= AWAY_MULT; }
   let total = 0; const M = [];
   for (let i = 0; i <= MAXG; i++) { M[i] = []; for (let j = 0; j <= MAXG; j++) { const p = poisson(i, lh) * poisson(j, la) * dcTau(i, j, lh, la); M[i][j] = p; total += p; } }
-  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0, best = { i: 0, j: 0, p: 0 };
+  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
+  const scores = [];
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
     const p = M[i][j] / total;
     if (i > j) pH += p; else if (i === j) pD += p; else pA += p;
     if (i + j >= 3) over25 += p; if (i >= 1 && j >= 1) btts += p;
-    // Score le plus probable : Poisson BRUT (sans la sur-pondération Dixon-Coles
-    // des scores nuls, qui faisait sortir 1-1 presque tout le temps).
-    const praw = poisson(i, lh) * poisson(j, la);
-    if (praw > best.p) best = { i, j, p: praw };
+    // Scorelines les plus probables : Poisson BRUT (sans la sur-pondération
+    // Dixon-Coles des scores nuls, qui faisait sortir 1-1 presque tout le temps).
+    if (i <= 6 && j <= 6) scores.push({ s: i + "–" + j, p: poisson(i, lh) * poisson(j, la) });
   }
-  return { lh, la, pH, pD, pA, over25, btts, score: best.i + "–" + best.j, scoreP: best.p };
+  scores.sort((a, b) => b.p - a.p);
+  const topScores = scores.slice(0, 4);
+  return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores };
 }
 function twoWay(p) { const d = p.pH + p.pA || 1; return { a: p.pH + p.pD * p.pH / d, b: p.pA + p.pD * p.pA / d }; }
 function parseOdds(s) { const v = parseFloat(String(s).replace(",", ".")); return v > 1 ? v : null; }
@@ -105,11 +126,8 @@ const short = (n) => n.length > 11 ? n.slice(0, 10) + "." : n;
 
 /* ---------- tournoi ---------- */
 function defaultGroups() {
-  const idx = POOL.map((t, i) => i).sort((a, b) => POOL[b].elo - POOL[a].elo);
-  const g = Array.from({ length: 12 }, () => []);
-  let dir = 1, c = 0;
-  for (let k = 0; k < idx.length; k++) { g[c].push(idx[k]); c += dir; if (c === 12) { c = 11; dir = -1; } else if (c < 0) { c = 0; dir = 1; } }
-  return g;
+  const idxOf = (name) => POOL.findIndex((t) => t.n === name);
+  return GROUPS_2026.map((g) => g.map(idxOf));
 }
 function tournamentStats(groups, results) {
   const st = POOL.map(() => ({ gf: 0, ga: 0, gp: 0 }));
@@ -244,9 +262,17 @@ function MatchTab() {
           <Bar pH={R.pH} pD={R.pD} pA={R.pA} />
           <div className="pf-tiles"><OutcomeTile label={"Victoire " + home.n} value={pct(R.pH)} kind="h" /><OutcomeTile label="Match nul" value={pct(R.pD)} kind="d" /><OutcomeTile label={"Victoire " + away.n} value={pct(R.pA)} kind="a" /></div>
         </section>
+        <section className="pf-card">
+          <div className="pf-result-head">Scores les plus probables</div>
+          <div className="pf-scores">{R.topScores.map((s, i) => (
+            <div key={i} className={"pf-scell" + (i === 0 ? " pf-scell-top" : "")}>
+              <div className="pf-scell-s">{s.s}</div><div className="pf-scell-p">{pct(s.p)}%</div>
+            </div>))}</div>
+          <div className="pf-scores-note">Au foot, les scores serrés (1-0, 1-1) restent les plus fréquents même quand « +2,5 buts » dépasse 50 % : la probabilité se répartit sur beaucoup de scores possibles.</div>
+        </section>
         <section className="pf-card pf-stats">
-          <div className="pf-stat"><div className="pf-stat-k">Score le plus probable</div><div className="pf-stat-v pf-accent">{R.score}</div><div className="pf-stat-x">{pct(R.scoreP)}%</div></div>
-          <div className="pf-stat"><div className="pf-stat-k">Buts attendus (xG)</div><div className="pf-stat-v">{R.lh.toFixed(2)} – {R.la.toFixed(2)}</div><div className="pf-stat-x">dom. – ext.</div></div>
+          <div className="pf-stat"><div className="pf-stat-k">Buts attendus (xG)</div><div className="pf-stat-v pf-accent">{R.lh.toFixed(2)} – {R.la.toFixed(2)}</div><div className="pf-stat-x">dom. – ext.</div></div>
+          <div className="pf-stat"><div className="pf-stat-k">Total de buts attendu</div><div className="pf-stat-v">{(R.lh + R.la).toFixed(2)}</div></div>
           <div className="pf-stat"><div className="pf-stat-k">+ de 2,5 buts</div><div className="pf-stat-v">{pct(R.over25)}%</div></div>
           <div className="pf-stat"><div className="pf-stat-k">Les deux marquent</div><div className="pf-stat-v">{pct(R.btts)}%</div></div>
         </section>
@@ -361,12 +387,12 @@ function WorldCupTab() {
   const [ko, setKo] = useState({});
   const [loaded, setLoaded] = useState(false);
   useEffect(() => { (async () => {
-    const g = await store.get("wc:groups"), r = await store.get("wc:results"), k = await store.get("wc:ko");
+    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v2"), k = await store.get("wc:ko:v2");
     if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); setLoaded(true);
   })(); }, []);
-  useEffect(() => { if (loaded) store.set("wc:groups", groups); }, [groups, loaded]);
-  useEffect(() => { if (loaded) store.set("wc:results", results); }, [results, loaded]);
-  useEffect(() => { if (loaded) store.set("wc:ko", ko); }, [ko, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:groups:v2", groups); }, [groups, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:results:v2", results); }, [results, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:ko:v2", ko); }, [ko, loaded]);
 
   const wc = useMemo(() => {
     const stats = tournamentStats(groups, results);
@@ -453,8 +479,19 @@ function LiveTab() {
   };
   useEffect(() => { load(); }, [league]);
   useEffect(() => { if (!teams.length) return; const t = setInterval(load, 600000); return () => clearInterval(t); }, [teams.length, league]);
+  const [h2h, setH2h] = useState([]);
+  const [h2hMsg, setH2hMsg] = useState("");
   const ta = teams[a], tb = teams[b];
   const R = ta && tb && a !== b ? predict({ ...ta, form: [] }, { ...tb, form: [] }, true) : null;
+  useEffect(() => {
+    if (!ta || !tb || a === b || !ta.id || !tb.id) { setH2h([]); setH2hMsg(""); return; }
+    let on = true; setH2hMsg("Chargement…"); setH2h([]);
+    fetch("/api/stats?source=h2h&home=" + ta.id + "&away=" + tb.id)
+      .then((r) => r.json())
+      .then((d) => { if (!on) return; const m = d.meetings || []; setH2h(m); setH2hMsg(m.length ? "" : "Aucune confrontation récente trouvée."); })
+      .catch(() => { if (on) setH2hMsg("Confrontations indisponibles (déploie le proxy)."); });
+    return () => { on = false; };
+  }, [ta && ta.id, tb && tb.id]);
   return (
     <>
       <section className="pf-card">
@@ -476,8 +513,20 @@ function LiveTab() {
           </div>
           {R && (<><Bar pH={R.pH} pD={R.pD} pA={R.pA} />
             <div className="pf-tiles"><OutcomeTile label={"Victoire " + short(ta.name)} value={pct(R.pH)} kind="h" /><OutcomeTile label="Match nul" value={pct(R.pD)} kind="d" /><OutcomeTile label={"Victoire " + short(tb.name)} value={pct(R.pA)} kind="a" /></div>
-            <div className="lv-meta">Score probable {R.score} · forces issues des stats réelles de la saison</div></>)}
+            <div className="pf-scores">{R.topScores.map((s, i) => (<div key={i} className={"pf-scell" + (i === 0 ? " pf-scell-top" : "")}><div className="pf-scell-s">{s.s}</div><div className="pf-scell-p">{pct(s.p)}%</div></div>))}</div>
+            <div className="lv-meta">xG {R.lh.toFixed(2)}–{R.la.toFixed(2)} · +2,5 buts {pct(R.over25)}% · les deux marquent {pct(R.btts)}%</div></>)}
         </section>
+        {R && (
+        <section className="pf-card">
+          <div className="pf-result-head">Confrontations directes</div>
+          {h2h.length > 0 ? (
+            <div className="h2h">{h2h.map((m, i) => (
+              <div key={i} className="h2h-row">
+                <span className="h2h-date">{m.date}</span>
+                <span className="h2h-match">{short(m.homeTeam)} <b>{m.homeGoals}–{m.awayGoals}</b> {short(m.awayTeam)}</span>
+              </div>))}</div>
+          ) : <div className="lv-meta">{h2hMsg || "—"}</div>}
+        </section>)}
         <section className="pf-card">
           <div className="pf-result-head">Forces du championnat (live)</div>
           <table className="wc-st"><thead><tr><th>Équipe</th><th>J</th><th>Att</th><th>Déf</th></tr></thead>
@@ -485,6 +534,52 @@ function LiveTab() {
           </table>
         </section>
       </>)}
+    </>
+  );
+}
+
+/* ========================= Onglet BUTEURS ========================= */
+function ScorersTab() {
+  const [league, setLeague] = useState("FL1");
+  const [players, setPlayers] = useState([]);
+  const [team, setTeam] = useState("Toutes");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [updated, setUpdated] = useState(null);
+  const load = async () => {
+    setLoading(true); setErr(null);
+    try {
+      const r = await fetch("/api/stats?source=scorers&league=" + league);
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
+      const d = await r.json();
+      if (!d.players || !d.players.length) throw new Error("Aucune donnée (saison pas encore commencée ?)");
+      setPlayers(d.players); setUpdated(new Date()); setTeam("Toutes");
+    } catch (e) { setErr(String(e.message || e)); setPlayers([]); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [league]);
+  const teamsList = ["Toutes", ...Array.from(new Set(players.map((p) => p.team)))];
+  const shown = team === "Toutes" ? players : players.filter((p) => p.team === team);
+  return (
+    <>
+      <section className="pf-card">
+        <div className="pf-result-head"><Target size={15} /> Buteurs & passeurs — saison en cours</div>
+        <div className="lv-ctrl">
+          <select value={league} onChange={(e) => setLeague(e.target.value)}>{LIVE_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
+          <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
+        </div>
+        {players.length > 0 && <select className="sc-team" value={team} onChange={(e) => setTeam(e.target.value)}>{teamsList.map((t, i) => <option key={i} value={t}>{t === "Toutes" ? "Toutes les équipes" : t}</option>)}</select>}
+        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "Chargement…"}</div>
+        {err && <div className="lv-err">⚠️ {err}<br /><span>Disponible une fois l'app déployée avec <code>FOOTBALLDATA_TOKEN</code>.</span></div>}
+      </section>
+      {shown.length > 0 && (
+        <section className="pf-card">
+          <table className="wc-st sc-tbl"><thead><tr><th>#</th><th>Joueur</th><th>Équipe</th><th>B</th><th>PD</th><th>J</th></tr></thead>
+            <tbody>{shown.map((p, i) => (
+              <tr key={i}><td>{i + 1}</td><td className="wc-tn">{p.name}</td><td className="sc-team-c">{short(p.team || "")}</td><td className="wc-pts">{p.goals}</td><td>{p.assists}</td><td>{p.matches}</td></tr>))}</tbody>
+          </table>
+          <div className="lv-meta">B = buts · PD = passes décisives. Idéal pour les paris « buteur ». Données football-data.org (offensives) ; les stats défensives par joueur nécessitent une API payante.</div>
+        </section>)}
     </>
   );
 }
@@ -497,15 +592,16 @@ export default function App() {
       <style>{CSS}</style>
       <header className="pf-header">
         <div className="pf-brand">PRONOSTIC<span>FOOT</span></div>
-        <div className="pf-sub">Modèle Elo + Poisson / Dixon-Coles · données d'exemple</div>
+        <div className="pf-sub">Elo + Poisson · groupes officiels Mondial 2026 · données live</div>
       </header>
       <nav className="pf-tabs">
         <button className={tab === "match" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("match")}>Match</button>
-        <button className={tab === "cdm" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("cdm")}>Coupe du Monde 2026</button>
+        <button className={tab === "cdm" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("cdm")}>Mondial 26</button>
         <button className={tab === "live" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("live")}>Live</button>
+        <button className={tab === "scorers" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("scorers")}>Buteurs</button>
       </nav>
       <main className="pf-main">
-        {tab === "match" ? <MatchTab /> : tab === "cdm" ? <WorldCupTab /> : <LiveTab />}
+        {tab === "match" ? <MatchTab /> : tab === "cdm" ? <WorldCupTab /> : tab === "live" ? <LiveTab /> : <ScorersTab />}
         <footer className="pf-footer"><ShieldAlert size={14} /><span>Outil d'analyse pédagogique. Les paris comportent un risque de perte ; aucun modèle ne garantit de gain. Jeu excessif : <b>09 74 75 13 13</b> (Joueurs Info Service, appel non surtaxé).</span></footer>
       </main>
     </div>
@@ -520,8 +616,8 @@ const CSS = `
 .pf-brand{font-family:'Saira Condensed';font-weight:800;font-size:33px;letter-spacing:.04em;line-height:.95;text-transform:uppercase;}
 .pf-brand span{color:var(--lime);}
 .pf-sub{color:var(--dim);font-size:12.5px;margin-top:4px;}
-.pf-tabs{max-width:560px;margin:6px auto 0;padding:0 14px;display:flex;gap:8px;}
-.pf-tab{flex:1;background:var(--card);border:1px solid var(--line);color:var(--dim);font-family:'Saira Condensed';font-weight:700;font-size:14px;letter-spacing:.04em;text-transform:uppercase;padding:11px 8px;border-radius:12px;cursor:pointer;transition:.15s;}
+.pf-tabs{max-width:560px;margin:6px auto 0;padding:0 14px;display:flex;gap:6px;flex-wrap:wrap;}
+.pf-tab{flex:1 1 22%;min-width:70px;background:var(--card);border:1px solid var(--line);color:var(--dim);font-family:'Saira Condensed';font-weight:700;font-size:13px;letter-spacing:.03em;text-transform:uppercase;padding:10px 6px;border-radius:11px;cursor:pointer;transition:.15s;}
 .pf-tab.on{color:#0b0d10;background:var(--lime);border-color:var(--lime);}
 .pf-main{max-width:560px;margin:0 auto;padding:12px 14px 40px;display:flex;flex-direction:column;gap:12px;}
 .pf-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 18px 40px -28px rgba(0,0,0,.9);animation:rise .35s ease both;}
@@ -646,4 +742,20 @@ const CSS = `
 .lv-pick{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
 .lv-pick select{flex:1;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:11px;font-size:13px;}
 .lv-pick span{color:var(--dim);font-size:12px;}
+.sc-team{width:100%;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px;font-size:13px;margin-bottom:8px;}
+.sc-tbl td{font-size:12px;}
+.sc-team-c{font-family:'Saira'!important;color:var(--dim);font-size:11px;text-align:left!important;}
+/* scores probables */
+.pf-scores{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.pf-scell{background:#0e1116;border:1px solid var(--line);border-radius:11px;padding:10px 4px;text-align:center;}
+.pf-scell-top{border-color:rgba(200,255,66,.4);}
+.pf-scell-s{font-family:'JetBrains Mono';font-weight:700;font-size:18px;}
+.pf-scell-top .pf-scell-s{color:var(--lime);}
+.pf-scell-p{font-family:'JetBrains Mono';font-size:11px;color:var(--dim);margin-top:2px;}
+.pf-scores-note{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:10px;}
+/* h2h */
+.h2h{display:flex;flex-direction:column;gap:6px;}
+.h2h-row{display:flex;align-items:center;gap:10px;background:#0e1116;border:1px solid var(--line);border-radius:9px;padding:8px 11px;}
+.h2h-date{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);width:74px;flex-shrink:0;}
+.h2h-match{font-size:12.5px;}.h2h-match b{font-family:'JetBrains Mono';color:var(--lime);margin:0 3px;}
 `;
