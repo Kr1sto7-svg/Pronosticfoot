@@ -924,12 +924,13 @@ function SquadsTab() {
   const [league, setLeague] = useState("WC");
   const [teams, setTeams] = useState([]);
   const [sel, setSel] = useState(0);
+  const [scorers, setScorers] = useState([]);
   const [scorersMap, setScorersMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [updated, setUpdated] = useState(null);
   const load = async () => {
-    setLoading(true); setErr(null); setTeams([]); setScorersMap({});
+    setLoading(true); setErr(null); setTeams([]); setScorers([]); setScorersMap({});
     try {
       const [tr, sr] = await Promise.all([
         fetch("/api/stats?source=teams&league=" + league),
@@ -941,8 +942,10 @@ function SquadsTab() {
       setTeams(d.teams); setSel(0); setUpdated(new Date());
       if (sr.ok) {
         const sd = await sr.json();
+        const raw = sd.players || [];
+        setScorers(raw);
         const m = {};
-        (sd.players || []).forEach((p) => { m[p.name] = { goals: p.goals, assists: p.assists || 0, matches: p.matches }; });
+        raw.forEach((p) => { m[p.name] = { goals: p.goals, assists: p.assists || 0, matches: p.matches }; });
         setScorersMap(m);
       }
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
@@ -950,6 +953,22 @@ function SquadsTab() {
   };
   useEffect(() => { load(); }, [league]);
   const age = (dob) => { if (!dob) return "—"; const d = new Date(dob); if (isNaN(d)) return "—"; const t = new Date(); let a = t.getFullYear() - d.getFullYear(); if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) a--; return a; };
+
+  const teamScorers = (() => {
+    if (!scorers.length) return [];
+    const groups = {};
+    scorers.forEach((p) => { if (!groups[p.team]) groups[p.team] = []; groups[p.team].push(p); });
+    return Object.entries(groups).map(([teamName, players]) => {
+      const frName = EN_TO_FR_NORM[normName(teamName)];
+      const poolEntry = frName ? POOL.find((t) => t.n === frName) : null;
+      return {
+        teamName, flag: poolEntry ? poolEntry.f : "🏳️",
+        players: [...players].sort((a, b) => b.goals - a.goals || (b.assists || 0) - (a.assists || 0)).slice(0, 5),
+        totalGoals: players.reduce((s, p) => s + p.goals, 0),
+      };
+    }).sort((a, b) => b.totalGoals - a.totalGoals);
+  })();
+
   const team = teams[sel];
   return (
     <>
@@ -959,35 +978,55 @@ function SquadsTab() {
           <select value={league} onChange={(e) => setLeague(e.target.value)}>{SCORER_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
           <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
         </div>
-        {teams.length > 0 && <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.name} ({t.squad.length})</option>)}</select>}
         <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "Chargement…"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Nécessite <code>FOOTBALLDATA_TOKEN</code> (gratuit). Les effectifs du Mondial se renseignent à l'approche du tournoi.</span></div>}
       </section>
-      {team && team.squad.length > 0 && (
+
+      {teamScorers.length > 0 && (
         <section className="pf-card">
-          <div className="pf-result-head">{team.name} · {team.squad.length} joueurs</div>
-          <table className="wc-st sc-tbl">
-            <thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th>{Object.keys(scorersMap).length > 0 && <><th>B</th><th>PD</th><th>J</th></>}</tr></thead>
-            <tbody>{team.squad.sort((a, b) => {
-              const sa = scorersMap[a.name], sb = scorersMap[b.name];
-              return (sb ? sb.goals : 0) - (sa ? sa.goals : 0) || (sb ? sb.assists : 0) - (sa ? sa.assists : 0);
-            }).map((p, i) => {
-              const st = scorersMap[p.name];
-              return (<tr key={i}>
-                <td className="wc-tn">{p.name}</td>
-                <td className="sc-team-c">{posFr(p.position)}</td>
-                <td className="sc-team-c">{p.nationality || "—"}</td>
-                <td>{age(p.dob)}</td>
-                {Object.keys(scorersMap).length > 0 && (<>
-                  <td className="wc-pts">{st ? st.goals : 0}</td>
-                  <td>{st ? st.assists : "—"}</td>
-                  <td>{st ? st.matches : "—"}</td>
-                </>)}
-              </tr>);
-            })}</tbody>
-          </table>
-          <div className="lv-meta">{Object.keys(scorersMap).length > 0 ? "B = buts · PD = passes déc. · J = matchs joués dans la compétition. Trié par buts." : "Source football-data.org : nom, poste, nationalité, âge."}</div>
-        </section>)}
+          <div className="pf-result-head">Meilleurs marqueurs par équipe · top 5</div>
+          {teamScorers.map(({ teamName, flag, players }) => (
+            <div key={teamName} className="sq-team-block">
+              <div className="sq-team-hd">{flag} {teamName}</div>
+              <table className="wc-st sc-tbl">
+                <thead><tr><th>Joueur</th><th>B</th><th>PD</th><th>J</th></tr></thead>
+                <tbody>{players.map((p, i) => (
+                  <tr key={i}><td className="wc-tn">{p.name}</td><td className="wc-pts">{p.goals}</td><td>{p.assists || 0}</td><td>{p.matches}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ))}
+          <div className="lv-meta">Top 5 par équipe · trié par nombre de buts · B = buts · PD = passes déc. · J = matchs.</div>
+        </section>
+      )}
+
+      {teams.length > 0 && (
+        <section className="pf-card">
+          <div className="pf-result-head">Effectif complet</div>
+          <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.name} ({t.squad.length})</option>)}</select>
+          {team && team.squad.length > 0 && (<>
+            <table className="wc-st sc-tbl">
+              <thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th>{Object.keys(scorersMap).length > 0 && <><th>B</th><th>PD</th><th>J</th></>}</tr></thead>
+              <tbody>{[...team.squad].sort((a, b) => {
+                const sa = scorersMap[a.name], sb = scorersMap[b.name];
+                return (sb ? sb.goals : 0) - (sa ? sa.goals : 0) || (sb ? sb.assists : 0) - (sa ? sa.assists : 0);
+              }).map((p, i) => {
+                const st = scorersMap[p.name];
+                return (<tr key={i}>
+                  <td className="wc-tn">{p.name}</td><td className="sc-team-c">{posFr(p.position)}</td>
+                  <td className="sc-team-c">{p.nationality || "—"}</td><td>{age(p.dob)}</td>
+                  {Object.keys(scorersMap).length > 0 && (<>
+                    <td className="wc-pts">{st ? st.goals : 0}</td>
+                    <td>{st ? st.assists : "—"}</td>
+                    <td>{st ? st.matches : "—"}</td>
+                  </>)}
+                </tr>);
+              })}</tbody>
+            </table>
+            <div className="lv-meta">{Object.keys(scorersMap).length > 0 ? "B = buts · PD = passes déc. · J = matchs. Trié par buts." : "Nom, poste, nationalité, âge."}</div>
+          </>)}
+        </section>
+      )}
     </>
   );
 }
@@ -1165,6 +1204,9 @@ const CSS = `
 .lv-pick select{flex:1;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:11px;font-size:13px;}
 .lv-pick span{color:var(--dim);font-size:12px;}
 .sc-team{width:100%;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px;font-size:13px;margin-bottom:8px;}
+.sq-team-block{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--line);}
+.sq-team-block:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.sq-team-hd{font-weight:700;font-size:13px;margin-bottom:6px;letter-spacing:.01em;}
 .sc-modes{display:flex;gap:8px;margin-bottom:10px;}
 .sc-mode{flex:1;background:#0e1116;border:1px solid var(--line);color:var(--dim);font-size:13px;font-weight:600;padding:9px;border-radius:10px;cursor:pointer;}
 .sc-mode.on{color:#0b0d10;background:var(--cyan);border-color:var(--cyan);}
