@@ -121,28 +121,42 @@ function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
   }
   let lh = leagueAvg * attH * defA, la = leagueAvg * attA * defH;
   if (!neutral && home.homeAtt == null) { lh *= HOME_MULT; la *= AWAY_MULT; }
-  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
+  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0, bHp = 0, bDp = 0, bAp = 0;
   const scores = [];
-  let bH = { s: "", p: 0 }, bD = { s: "", p: 0 }, bA = { s: "", p: 0 };
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
     const p = poisson(i, lh) * poisson(j, la) * dcTau(i, j, lh, la, rho);
-    if (i > j) { pH += p; if (p > bH.p) bH = { s: i + "–" + j, p }; }
-    else if (i === j) { pD += p; if (p > bD.p) bD = { s: i + "–" + j, p }; }
-    else { pA += p; if (p > bA.p) bA = { s: i + "–" + j, p }; }
+    if (i > j) { pH += p; if (p > bHp) bHp = p; }
+    else if (i === j) { pD += p; if (p > bDp) bDp = p; }
+    else { pA += p; if (p > bAp) bAp = p; }
     if (i + j >= 3) over25 += p; if (i >= 1 && j >= 1) btts += p;
     if (i <= 6 && j <= 6) scores.push({ s: i + "–" + j, p });
   }
   const total = pH + pD + pA || 1;
   pH /= total; pD /= total; pA /= total; over25 /= total; btts /= total;
-  scores.forEach((s) => (s.p /= total)); bH.p /= total; bD.p /= total; bA.p /= total;
+  bHp /= total; bDp /= total; bAp /= total;
+  scores.forEach((s) => (s.p /= total));
   scores.sort((a, b) => b.p - a.p);
   const topScores = scores.slice(0, 6);
-  // Score prédit = meilleur score dans la catégorie la plus probable (évite le biais 1-1 du dcTau)
+  // Scores calculés depuis les buts espérés : round(favori) / floor(outsider)
+  const topHome = (() => {
+    const h = Math.max(1, Math.round(lh));
+    const a = Math.max(0, Math.min(Math.floor(la), h - 1));
+    return { s: h + "–" + a, p: bHp };
+  })();
+  const topDraw = (() => {
+    const d = Math.floor((lh + la) / 2);
+    return { s: d + "–" + d, p: bDp };
+  })();
+  const topAway = (() => {
+    const a = Math.max(1, Math.round(la));
+    const h = Math.max(0, Math.min(Math.floor(lh), a - 1));
+    return { s: h + "–" + a, p: bAp };
+  })();
   let score, scoreP;
-  if (pH >= pD && pH >= pA && bH.s) { score = bH.s; scoreP = bH.p; }
-  else if (pA > pH && pA >= pD && bA.s) { score = bA.s; scoreP = bA.p; }
-  else { score = bD.s || topScores[0].s; scoreP = bD.p || topScores[0].p; }
-  return { lh, la, pH, pD, pA, over25, btts, score, scoreP, topScores, topHome: bH, topDraw: bD, topAway: bA };
+  if (pH >= pD && pH >= pA) { score = topHome.s; scoreP = topHome.p; }
+  else if (pA > pH && pA >= pD) { score = topAway.s; scoreP = topAway.p; }
+  else { score = topDraw.s; scoreP = topDraw.p; }
+  return { lh, la, pH, pD, pA, over25, btts, score, scoreP, topScores, topHome, topDraw, topAway };
 }
 // Match à élimination directe : prolongation (30') puis tirs au but si nul après 90'.
 function predictKnockout(home, away, leagueAvg = BASE_GOALS, rho = RHO) {
