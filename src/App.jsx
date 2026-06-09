@@ -448,9 +448,17 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveI
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
               <span className="wc-mscore">{isLive && <span className="wc-live-tag">live</span>}<ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} live={isLive} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} live={isLive} /></span>
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
-            {p && <div className="wc-mp">1/N/2 : {pct(p.pH)} / {pct(p.pD)} / {pct(p.pA)}</div>}
-            {p && <div className="wc-mscores">{p.topScores.slice(0, 3).map((s, k) => (
-              <span key={k} className={"wc-sc" + (k === 0 ? " wc-sc-top" : "")}>{s.s} <b>{pct(s.p)}%</b></span>))}</div>}
+            {p && <div className="wc-pred">
+              <span className={"wc-pc" + (p.pH >= p.pD && p.pH >= p.pA ? " wc-pc-top" : "")}>
+                <b>1 · {pct(p.pH)}%</b><em>{p.topHome.s}</em>
+              </span>
+              <span className={"wc-pc" + (p.pD >= p.pH && p.pD >= p.pA ? " wc-pc-top" : "")}>
+                <b>N · {pct(p.pD)}%</b><em>{p.topDraw.s}</em>
+              </span>
+              <span className={"wc-pc" + (p.pA > p.pH && p.pA > p.pD ? " wc-pc-top" : "")}>
+                <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
+              </span>
+            </div>}
           </div>);
         })}</div>
       </div>)}
@@ -1177,11 +1185,13 @@ const CSS = `
 .wc-mdate{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);}
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
-.wc-mp{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);margin-top:5px;text-align:center;}
-.wc-mscores{display:flex;justify-content:center;gap:8px;margin-top:4px;flex-wrap:wrap;}
-.wc-sc{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);}
-.wc-sc b{color:#c4cbd4;font-weight:700;}
-.wc-sc-top{color:var(--lime);}.wc-sc-top b{color:var(--lime);}
+.wc-pred{display:flex;gap:5px;margin-top:6px;}
+.wc-pc{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 4px;border-radius:7px;background:#1b1f25;flex:1;min-width:0;}
+.wc-pc b{font-size:10px;color:var(--dim);font-weight:700;white-space:nowrap;}
+.wc-pc em{font-style:normal;font-family:'JetBrains Mono';font-size:12px;color:#c4cbd4;font-weight:700;}
+.wc-pc-top{background:rgba(70,211,255,.12);}
+.wc-pc-top b{color:var(--cyan);}
+.wc-pc-top em{color:var(--lime);}
 .wc-ties{padding:6px 13px 14px;display:flex;flex-direction:column;gap:8px;}
 .wc-tie{position:relative;display:flex;flex-direction:column;gap:6px;}
 .wc-tie-sides{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
