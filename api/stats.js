@@ -54,6 +54,62 @@ export default async function handler(req, res) {
       return res.status(200).json({ source, home, away, updated: new Date().toISOString(), meetings });
     }
 
+    /* ---- SÉLECTION NATIONALE via API-Football (squad + stats joueurs) ---- */
+    if (source === "natteam") {
+      const key = process.env.APIFOOTBALL_KEY;
+      if (!key) return res.status(500).json({ error: "APIFOOTBALL_KEY non configurée (clé api-football.com requise pour les sélections)" });
+      const q = req.query.q, season = req.query.season || "2024";
+      if (!q) return res.status(400).json({ error: "paramètre 'q' (nom de la sélection) requis" });
+      const AH = { "x-apisports-key": key };
+      // 1) résoudre l'ID de l'équipe nationale par son nom
+      const tr = await fetch("https://v3.football.api-sports.io/teams?search=" + encodeURIComponent(q), { headers: AH });
+      const tj = await tr.json();
+      const list = tj.response || [];
+      const nat = list.find((x) => x.team && x.team.national) || list[0];
+      if (!nat) return res.status(200).json({ source, team: q, players: [], note: "Équipe introuvable sur API-Football." });
+      const teamId = nat.team.id, teamName = nat.team.name;
+      // 2) joueurs + statistiques de la saison (paginé, borné à 3 pages pour le quota)
+      let players = [], page = 1, totalPages = 1;
+      do {
+        const pr = await fetch("https://v3.football.api-sports.io/players?team=" + teamId + "&season=" + season + "&page=" + page, { headers: AH });
+        const pj = await pr.json();
+        totalPages = (pj.paging && pj.paging.total) || 1;
+        (pj.response || []).forEach((p) => {
+          const st = (p.statistics || [])[0] || {};
+          players.push({
+            name: p.player && p.player.name,
+            nationality: p.player && p.player.nationality,
+            age: p.player && p.player.age,
+            position: (st.games && st.games.position) || "",
+            appearances: (st.games && st.games.appearences) || 0,
+            goals: (st.goals && st.goals.total) || 0,
+            assists: (st.goals && st.goals.assists) || 0,
+          });
+        });
+        page++;
+      } while (page <= totalPages && page <= 2);
+      players.sort((a, b) => b.goals - a.goals || b.assists - a.assists);
+      return res.status(200).json({ source, team: teamName, season, count: players.length, players });
+    }
+
+    /* ---- RÉSULTATS + PROCHAINS MATCHS d'une compétition ---- */
+    if (source === "matches") {
+      if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+      const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/matches", { headers: H });
+      const j = await r.json();
+      const all = j.matches || [];
+      const map = (m) => ({
+        id: m.id, date: m.utcDate, status: m.status, matchday: m.matchday,
+        homeId: m.homeTeam.id, awayId: m.awayTeam.id,
+        home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
+        homeGoals: m.score && m.score.fullTime ? m.score.fullTime.home : null,
+        awayGoals: m.score && m.score.fullTime ? m.score.fullTime.away : null,
+      });
+      const finished = all.filter((m) => m.status === "FINISHED").sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate)).slice(0, 12).map(map);
+      const upcoming = all.filter((m) => ["TIMED", "SCHEDULED"].includes(m.status)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate)).slice(0, 12).map(map);
+      return res.status(200).json({ source, league, updated: new Date().toISOString(), finished, upcoming });
+    }
+
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
     if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
     const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/standings", { headers: H });
@@ -66,6 +122,7 @@ export default async function handler(req, res) {
       matches: row.playedGames,
       goalsFor: row.goalsFor,
       goalsAgainst: row.goalsAgainst,
+      form: row.form || "", // forme récente (ex: "W,W,D,L,W") fournie par football-data
     })).filter((t) => t.matches > 0);
     if (!rows.length) return res.status(200).json({ source: "standings", league, teams: [] });
     const totM = rows.reduce((s, t) => s + t.matches, 0);
