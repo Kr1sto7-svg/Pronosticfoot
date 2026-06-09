@@ -198,20 +198,41 @@ export default async function handler(req, res) {
     const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/standings", { headers: H });
     const j = await r.json();
     const table = (j.standings || []).find((s) => s.type === "TOTAL")?.table || [];
-    let rows = table.map((row) => ({
-      id: row.team.id,
-      name: row.team.name,
-      crest: row.team.crest,
-      matches: row.playedGames,
-      goalsFor: row.goalsFor,
-      goalsAgainst: row.goalsAgainst,
-      form: row.form || "", // forme récente (ex: "W,W,D,L,W") fournie par football-data
-    })).filter((t) => t.matches > 0);
+    const homeTable = (j.standings || []).find((s) => s.type === "HOME")?.table || [];
+    const awayTable = (j.standings || []).find((s) => s.type === "AWAY")?.table || [];
+    const homeIdx = {}; homeTable.forEach(row => { homeIdx[row.team.id] = row; });
+    const awayIdx = {}; awayTable.forEach(row => { awayIdx[row.team.id] = row; });
+    let rows = table.map((row) => {
+      const h = homeIdx[row.team.id], a = awayIdx[row.team.id];
+      return {
+        id: row.team.id,
+        name: row.team.name,
+        crest: row.team.crest,
+        matches: row.playedGames,
+        goalsFor: row.goalsFor,
+        goalsAgainst: row.goalsAgainst,
+        form: row.form || "",
+        homeMatches: h?.playedGames || 0,
+        homeGoalsFor: h?.goalsFor || 0,
+        homeGoalsAgainst: h?.goalsAgainst || 0,
+        awayMatches: a?.playedGames || 0,
+        awayGoalsFor: a?.goalsFor || 0,
+        awayGoalsAgainst: a?.goalsAgainst || 0,
+      };
+    }).filter((t) => t.matches > 0);
     if (!rows.length) return res.status(200).json({ source: "standings", league, teams: [] });
     const totM = rows.reduce((s, t) => s + t.matches, 0);
     const totG = rows.reduce((s, t) => s + t.goalsFor, 0);
     const leagueAvg = totM ? totG / totM : 1.35;
-    const teams = rows.map((t) => { const rr = ratings(t.matches, t.goalsFor, t.goalsAgainst, leagueAvg); return { ...t, att: rr.att, def: rr.def }; });
+    const clamp = (x) => Math.max(0.6, Math.min(1.7, x));
+    const teams = rows.map((t) => {
+      const rr = ratings(t.matches, t.goalsFor, t.goalsAgainst, leagueAvg);
+      const homeAtt = t.homeMatches >= 4 ? clamp((t.homeGoalsFor / t.homeMatches) / leagueAvg) : null;
+      const awayAtt = t.awayMatches >= 4 ? clamp((t.awayGoalsFor / t.awayMatches) / leagueAvg) : null;
+      const homeDef = t.homeMatches >= 4 ? clamp((t.homeGoalsAgainst / t.homeMatches) / leagueAvg) : null;
+      const awayDef = t.awayMatches >= 4 ? clamp((t.awayGoalsAgainst / t.awayMatches) / leagueAvg) : null;
+      return { ...t, att: rr.att, def: rr.def, homeAtt, awayAtt, homeDef, awayDef };
+    });
     res.status(200).json({ source: "standings", league, leagueAvg, updated: new Date().toISOString(), teams });
   } catch (e) {
     res.status(502).json({ error: String(e) });

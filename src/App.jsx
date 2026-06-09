@@ -15,6 +15,7 @@ const BASE_GOALS = 1.35, HOME_MULT = 1.18, AWAY_MULT = 0.92, RHO = -0.13, MAXG =
 const FORM_DECAY = 0.75;
 const WC_AVG = 1.18;
 const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
+const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
 const LETTERS = "ABCDEFGHIJKL".split("");
 const GROUP_PAIRS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
 
@@ -97,26 +98,34 @@ function formScore(form) {
   form.forEach((r, i) => { const wi = Math.pow(FORM_DECAY, form.length - 1 - i); sum += (r === "W" ? 1 : r === "L" ? -1 : 0) * wi; w += wi; });
   return w ? sum / w : 0;
 }
-function dcTau(i, j, lh, la) {
-  if (i === 0 && j === 0) return 1 - lh * la * RHO;
-  if (i === 0 && j === 1) return 1 + lh * RHO;
-  if (i === 1 && j === 0) return 1 + la * RHO;
-  if (i === 1 && j === 1) return 1 - RHO;
+function dcTau(i, j, lh, la, rho = RHO) {
+  if (i === 0 && j === 0) return 1 - lh * la * rho;
+  if (i === 0 && j === 1) return 1 + lh * rho;
+  if (i === 1 && j === 0) return 1 + la * rho;
+  if (i === 1 && j === 1) return 1 - rho;
   return 1;
 }
-function predict(home, away, neutral, leagueAvg = BASE_GOALS) {
+function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
   const fh = formScore(home.form), fa = formScore(away.form);
-  const attH = home.att * (1 + 0.08 * fh), defH = home.def * (1 - 0.05 * fh);
-  const attA = away.att * (1 + 0.08 * fa), defA = away.def * (1 - 0.05 * fa);
+  let attH, defH, attA, defA;
+  if (!neutral && home.homeAtt != null && away.awayDef != null) {
+    attH = home.homeAtt * (1 + 0.08 * fh);
+    defH = (home.homeDef ?? home.def) * (1 - 0.05 * fh);
+    attA = (away.awayAtt ?? away.att) * (1 + 0.08 * fa);
+    defA = away.awayDef * (1 - 0.05 * fa);
+  } else {
+    attH = home.att * (1 + 0.08 * fh);
+    defH = home.def * (1 - 0.05 * fh);
+    attA = away.att * (1 + 0.08 * fa);
+    defA = away.def * (1 - 0.05 * fa);
+  }
   let lh = leagueAvg * attH * defA, la = leagueAvg * attA * defH;
-  if (!neutral) { lh *= HOME_MULT; la *= AWAY_MULT; }
-  // Une seule distribution : produit de deux Poisson sur les buts attendus (xG).
-  // Tout (1/N/2, +2,5, BTTS, scores) en découle -> cohérent, sans biais 1-1.
+  if (!neutral && home.homeAtt == null) { lh *= HOME_MULT; la *= AWAY_MULT; }
   let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
   const scores = [];
   let bH = { s: "", p: 0 }, bD = { s: "", p: 0 }, bA = { s: "", p: 0 };
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
-    const p = poisson(i, lh) * poisson(j, la);
+    const p = poisson(i, lh) * poisson(j, la) * dcTau(i, j, lh, la, rho);
     if (i > j) { pH += p; if (p > bH.p) bH = { s: i + "–" + j, p }; }
     else if (i === j) { pD += p; if (p > bD.p) bD = { s: i + "–" + j, p }; }
     else { pA += p; if (p > bA.p) bA = { s: i + "–" + j, p }; }
@@ -131,8 +140,8 @@ function predict(home, away, neutral, leagueAvg = BASE_GOALS) {
   return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores, topHome: bH, topDraw: bD, topAway: bA };
 }
 // Match à élimination directe : prolongation (30') puis tirs au but si nul après 90'.
-function predictKnockout(home, away, leagueAvg = BASE_GOALS) {
-  const base = predict(home, away, true, leagueAvg);
+function predictKnockout(home, away, leagueAvg = BASE_GOALS, rho = RHO) {
+  const base = predict(home, away, true, leagueAvg, rho);
   const lhE = base.lh / 3, laE = base.la / 3; // ~30 min = 1/3 de match
   let etA = 0, etB = 0, etD = 0;
   for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
@@ -169,8 +178,8 @@ function h2hEmpirical(homeName, meetings) {
   return n ? { n, pH: hw / n, pD: d / n, pA: aw / n } : null;
 }
 // 1/N/2 enrichi : forces de la saison + forme récente (via predict) + confrontations directes.
-function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS) {
-  const base = predict(home, away, true, leagueAvg);
+function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = RHO) {
+  const base = predict(home, away, true, leagueAvg, rho);
   const emp = meetings && meetings.length ? h2hEmpirical(home.name, meetings) : null;
   if (!emp || emp.n < 3) return { R: base, h2hN: emp ? emp.n : 0, w: 0 };
   const w = Math.min(0.22, emp.n * 0.035); // poids croissant, plafonné (le H2H reste peu fiable)
@@ -199,17 +208,34 @@ function tournamentStats(groups, results) {
   }));
   return st;
 }
-function effectivePool(stats) {
+function eloAfterGroups(groups, results) {
+  const elo = POOL.map(t => t.elo);
+  const K = 30;
+  groups.forEach((g, gi) => {
+    GROUP_PAIRS.forEach(([x, y]) => {
+      const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
+      if (!r || r.hg == null || r.ag == null) return;
+      const ti = g[x], tj = g[y];
+      const sa = r.hg > r.ag ? 1 : r.hg === r.ag ? 0.5 : 0;
+      const ea = 1 / (1 + Math.pow(10, (elo[tj] - elo[ti]) / 400));
+      elo[ti] += K * (sa - ea);
+      elo[tj] += K * ((1 - sa) - (1 - ea));
+    });
+  });
+  return elo;
+}
+function effectivePool(stats, eloArr) {
   return POOL.map((t, i) => {
     const s = stats[i];
-    if (!s.gp) return { ...t };
+    const newElo = eloArr ? eloArr[i] : t.elo;
+    if (!s.gp) return { ...t, elo: newElo };
     const w = Math.min(0.5, 0.15 * s.gp);
     const attObs = Math.max(0.2, s.gf / s.gp) / BASE_GOALS;
     const defObs = Math.max(0.2, s.ga / s.gp) / BASE_GOALS;
-    return { ...t, att: Math.pow(t.att, 1 - w) * Math.pow(attObs, w), def: Math.pow(t.def, 1 - w) * Math.pow(defObs, w) };
+    return { ...t, elo: newElo, att: Math.pow(t.att, 1 - w) * Math.pow(attObs, w), def: Math.pow(t.def, 1 - w) * Math.pow(defObs, w) };
   });
 }
-function groupTable(group, gi, results) {
+function groupTable(group, gi, results, eff) {
   const rows = group.map((ti) => ({ ti, pts: 0, gf: 0, ga: 0, gp: 0 }));
   GROUP_PAIRS.forEach(([x, y]) => {
     const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
@@ -220,10 +246,10 @@ function groupTable(group, gi, results) {
     }
   });
   rows.forEach((r) => (r.gd = r.gf - r.ga));
-  return [...rows].sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo);
+  return [...rows].sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || (eff ? eff[b.ti].elo - eff[a.ti].elo : POOL[b.ti].elo - POOL[a.ti].elo));
 }
 function seedOrder(n) { let p = [1, 2]; while (p.length < n) { const s = p.length * 2 + 1, nx = []; for (const x of p) { nx.push(x); nx.push(s - x); } p = nx; } return p; }
-function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS) {
+function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS, rho = RHO) {
   const order = seedOrder(32);
   const slots = order.map((s) => qualRanked[s - 1] ?? null);
   let ties = []; for (let k = 0; k < 16; k++) ties.push([slots[2 * k], slots[2 * k + 1]]);
@@ -236,7 +262,7 @@ function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS) {
       const id = name + "-" + k;
       let prob = 0.5, winner = null, decided = false, kb = null;
       if (a != null && b != null) {
-        kb = predictKnockout(eff[a], eff[b], leagueAvg);
+        kb = predictKnockout(eff[a], eff[b], leagueAvg, rho);
         prob = kb.advA;
         const m = ko[id], sc = results[id];
         if (m != null) { winner = m; decided = true; }
@@ -376,12 +402,12 @@ function Fold({ open, setOpen, icon, title, children }) {
 }
 
 /* ========================= Onglet COUPE DU MONDE ========================= */
-function ScoreInput({ value, onChange }) {
-  return <input className="wc-score" inputMode="numeric" maxLength={2} value={value == null ? "" : value} placeholder="–" onChange={(e) => onChange(e.target.value)} />;
+function ScoreInput({ value, onChange, live }) {
+  return <input className={"wc-score" + (live ? " wc-score-live" : "")} inputMode="numeric" maxLength={2} value={value == null ? "" : value} placeholder="–" onChange={(e) => onChange(e.target.value)} />;
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore }) {
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveIds }) {
   const [open, setOpen] = useState(gi === 0);
-  const table = groupTable(group, gi, results);
+  const table = groupTable(group, gi, results, eff);
   const played = GROUP_PAIRS.filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
   return (
     <div className="pf-card wc-group">
@@ -405,10 +431,11 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore }) {
           const id = "G" + LETTERS[gi] + "-" + x + "-" + y, r = results[id] || {};
           const ta = POOL[group[x]], tb = POOL[group[y]];
           const done = r.hg != null && r.ag != null;
-          const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG) : null;
+          const isLive = liveIds ? liveIds.has(id) : false;
+          const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
-              <span className="wc-mscore"><ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} /></span>
+              <span className="wc-mscore">{isLive && <span className="wc-live-tag">live</span>}<ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} live={isLive} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} live={isLive} /></span>
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
             {p && <div className="wc-mp">1/N/2 : {pct(p.pH)} / {pct(p.pD)} / {pct(p.pA)}</div>}
             {p && <div className="wc-mscores">{p.topScores.slice(0, 3).map((s, k) => (
@@ -461,6 +488,7 @@ function WorldCupTab() {
   const [results, setResults] = useState({});
   const [ko, setKo] = useState({});
   const [loaded, setLoaded] = useState(false);
+  const [rawApiMatches, setRawApiMatches] = useState([]);
   useEffect(() => { (async () => {
     const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v2"), k = await store.get("wc:ko:v2");
     if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); setLoaded(true);
@@ -468,33 +496,76 @@ function WorldCupTab() {
   useEffect(() => { if (loaded) store.set("wc:groups:v2", groups); }, [groups, loaded]);
   useEffect(() => { if (loaded) store.set("wc:results:v2", results); }, [results, loaded]);
   useEffect(() => { if (loaded) store.set("wc:ko:v2", ko); }, [ko, loaded]);
+  useEffect(() => {
+    const fetchWcMatches = async () => {
+      try {
+        const r = await fetch("/api/stats?source=matches&league=WC");
+        if (!r.ok) return;
+        const d = await r.json();
+        setRawApiMatches(d.finished || []);
+      } catch {}
+    };
+    fetchWcMatches();
+    const iv = setInterval(fetchWcMatches, 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const apiMapped = useMemo(() => {
+    const r = {};
+    for (const m of rawApiMatches) {
+      if (m.homeGoals == null || m.awayGoals == null) continue;
+      const hFr = EN_TO_FR_NORM[normName(m.home)];
+      const aFr = EN_TO_FR_NORM[normName(m.away)];
+      if (!hFr || !aFr) continue;
+      const hIdx = POOL.findIndex((t) => t.n === hFr);
+      const aIdx = POOL.findIndex((t) => t.n === aFr);
+      if (hIdx < 0 || aIdx < 0) continue;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        for (const [x, y] of GROUP_PAIRS) {
+          if (g[x] === hIdx && g[y] === aIdx) {
+            r["G" + LETTERS[gi] + "-" + x + "-" + y] = { hg: m.homeGoals, ag: m.awayGoals };
+          } else if (g[x] === aIdx && g[y] === hIdx) {
+            r["G" + LETTERS[gi] + "-" + x + "-" + y] = { hg: m.awayGoals, ag: m.homeGoals };
+          }
+        }
+      }
+    }
+    return r;
+  }, [rawApiMatches, groups]);
+
+  const effectiveResults = useMemo(() => ({ ...apiMapped, ...results }), [apiMapped, results]);
+  const liveIds = useMemo(() => new Set(Object.keys(apiMapped).filter((id) => !results[id])), [apiMapped, results]);
 
   const wc = useMemo(() => {
-    const stats = tournamentStats(groups, results);
-    const eff = effectivePool(stats);
-    const tables = groups.map((g, gi) => groupTable(g, gi, results));
-    const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo);
+    const stats = tournamentStats(groups, effectiveResults);
+    const eloArr = eloAfterGroups(groups, effectiveResults);
+    const eff = effectivePool(stats, eloArr);
+    const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
+    const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    // Lignes des qualifiés (objets {ti,pts,gd,gf}) — 2 par groupe + 8 meilleurs 3es.
     const qualRows = [];
     tables.forEach((t) => { qualRows.push(t[0], t[1]); });
     thirds.slice(0, 8).forEach((th) => qualRows.push(th));
     const rank = [...qualRows]
-      .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo)
+      .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo)
       .map((r) => r.ti);
-    const rounds = buildKnockout(eff, rank, ko, results, WC_AVG);
+    const rounds = buildKnockout(eff, rank, ko, effectiveResults, WC_AVG, LEAGUE_RHO.WC);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, results, ko]);
+  }, [groups, effectiveResults, ko]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
-  const onScore = (id, side, val) => setResults((p) => {
-    const cur = { ...(p[id] || { hg: null, ag: null }) };
-    cur[side] = val === "" ? null : Math.max(0, Math.min(20, parseInt(val, 10) || 0));
-    const n = { ...p, [id]: cur };
-    if (cur.hg == null && cur.ag == null) delete n[id];
-    return n;
-  });
+  const onScore = (id, side, val) => {
+    const base = effectiveResults[id] || { hg: null, ag: null };
+    setResults((p) => {
+      const cur = { ...(p[id] || base) };
+      cur[side] = val === "" ? null : Math.max(0, Math.min(20, parseInt(val, 10) || 0));
+      const n = { ...p, [id]: cur };
+      if (cur.hg == null && cur.ag == null) delete n[id];
+      return n;
+    });
+  };
   const onPick = (id, ti) => setKo((p) => { const n = { ...p }; if (n[id] === ti) delete n[id]; else n[id] = ti; return n; });
   const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setGroups(defaultGroups()); } };
 
@@ -511,7 +582,7 @@ function WorldCupTab() {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi : classements, qualifications et probabilités se recalculent automatiquement. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={results} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onScore={onScore} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onScore={onScore} liveIds={liveIds} />)}
       </>) : (<>
         <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
         {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} />)}
@@ -592,7 +663,7 @@ function LiveTab() {
   const [oddsNote, setOddsNote] = useState("");
   const ta = teams[a], tb = teams[b];
   const hist = ta && tb && a !== b
-    ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h, leagueAvg)
+    ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
     : null;
   const R = hist ? hist.R : null;
   useEffect(() => {
@@ -623,13 +694,13 @@ function LiveTab() {
   const fixtureProbs = (m) => {
     const hh = byId(m.homeId), aw = byId(m.awayId);
     if (!hh || !aw) return null;
-    return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, true, leagueAvg);
+    return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg, LEAGUE_RHO[league] || RHO);
   };
   // Value = proba modèle × meilleure cote. > 1,05 -> le modèle voit de la valeur.
   const oddsValue = (ev) => {
     const hh = byName(ev.home), aw = byName(ev.away);
     if (!hh || !aw) return null;
-    const p = predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg);
+    const p = predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg, LEAGUE_RHO[league] || RHO);
     const v = [
       { k: "1", lbl: short(ev.home), ev: p.pH * ev.oddsH, pm: p.pH },
       { k: "N", lbl: "Nul", ev: p.pD * ev.oddsD, pm: p.pD },
@@ -738,6 +809,11 @@ const NAT_EN = {
   "Qatar": "Qatar", "Arabie saoudite": "Saudi Arabia", "Jordanie": "Jordan", "Irak": "Iraq",
   "Cap-Vert": "Cape Verde", "Haïti": "Haiti", "Curaçao": "Curacao", "Nouvelle-Zélande": "New Zealand",
 };
+const EN_TO_FR_NORM = (() => {
+  const m = {};
+  Object.entries(NAT_EN).forEach(([fr, en]) => { m[normName(en)] = fr; });
+  return m;
+})();
 function ScorersTab() {
   const [mode, setMode] = useState("comp");
   // mode compétition (football-data.org)
@@ -1014,6 +1090,8 @@ const CSS = `
 .wc-mscore i{color:var(--dim);font-style:normal;}
 .wc-score{width:34px;height:32px;background:#15181d;border:1px solid var(--line);border-radius:8px;color:var(--txt);font-family:'JetBrains Mono';font-weight:700;font-size:16px;text-align:center;outline:none;}
 .wc-score:focus{border-color:var(--cyan);}
+.wc-score-live{border-color:var(--lime);color:var(--lime);}
+.wc-live-tag{font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;letter-spacing:.5px;text-transform:uppercase;line-height:1.4;}
 .wc-mp{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);margin-top:5px;text-align:center;}
 .wc-mscores{display:flex;justify-content:center;gap:8px;margin-top:4px;flex-wrap:wrap;}
 .wc-sc{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);}
