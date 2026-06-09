@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { ArrowLeftRight, ChevronDown, Info, Plug, ShieldAlert, TrendingUp, Trophy, RotateCcw, Target, Layers, Radio } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Info, Plug, ShieldAlert, TrendingUp, Trophy, RotateCcw, Target, Layers, Radio, Users } from "lucide-react";
 
 /* =========================================================================
    PronosticFoot — prototype web mobile
@@ -542,6 +542,7 @@ function LiveTab() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [updated, setUpdated] = useState(null);
+  const [xgOn, setXgOn] = useState(false);
   const load = async () => {
     setLoading(true); setErr(null);
     try {
@@ -550,7 +551,23 @@ function LiveTab() {
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
       if (!d.teams || !d.teams.length) throw new Error("Aucune donnée (saison pas encore commencée ?)");
-      setTeams(d.teams); setUpdated(new Date()); setA(0); setB(Math.min(1, d.teams.length - 1));
+      let tm = d.teams, xgActive = false;
+      // xG RÉEL (Understat) prioritaire quand disponible : remplace les forces basées sur les buts.
+      try {
+        const xr = await fetch("/api/stats?source=understat&league=" + league);
+        const xd = await xr.json();
+        if (xd.teams && xd.teams.length) {
+          const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(fc|cf|afc|ac|ssc|rc|as|sc)\b/g, "").replace(/[^a-z]/g, "");
+          const clampR = (x) => Math.max(0.6, Math.min(1.7, x));
+          const byN = {}; xd.teams.forEach((t) => (byN[norm(t.name)] = t));
+          tm = tm.map((t) => {
+            const x = byN[norm(t.name)];
+            if (x && x.matches) { xgActive = true; return { ...t, att: clampR(x.xgFor / BASE_GOALS), def: clampR(x.xgAgainst / BASE_GOALS), xgFor: x.xgFor, xgAgainst: x.xgAgainst }; }
+            return t;
+          });
+        }
+      } catch { /* repli silencieux sur les forces basées sur les buts */ }
+      setTeams(tm); setXgOn(xgActive); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
@@ -610,7 +627,7 @@ function LiveTab() {
             <div className="pf-tiles"><OutcomeTile label={"Victoire " + short(ta.name)} value={pct(R.pH)} kind="h" /><OutcomeTile label="Match nul" value={pct(R.pD)} kind="d" /><OutcomeTile label={"Victoire " + short(tb.name)} value={pct(R.pA)} kind="a" /></div>
             <div className="pf-scores">{R.topScores.map((s, i) => (<div key={i} className={"pf-scell" + (i === 0 ? " pf-scell-top" : "")}><div className="pf-scell-s">{s.s}</div><div className="pf-scell-p">{pct(s.p)}%</div></div>))}</div>
             <div className="lv-meta">xG {R.lh.toFixed(2)}–{R.la.toFixed(2)} · +2,5 buts {pct(R.over25)}% · les deux marquent {pct(R.btts)}%</div>
-            <div className="lv-meta">Pris en compte : forces de la saison + forme récente (5 derniers) + {hist.h2hN || 0} confrontation(s){hist.w ? " · poids historique " + pct(hist.w) + "%" : ""}</div></>)}
+            <div className="lv-meta">Pris en compte : {xgOn ? "xG réel (Understat)" : "xG estimé d'après les buts"} + forme récente (5 derniers) + {hist.h2hN || 0} confrontation(s){hist.w ? " · poids historique " + pct(hist.w) + "%" : ""}</div></>)}
         </section>
         {R && (
         <section className="pf-card">
@@ -761,6 +778,55 @@ function ScorersTab() {
   );
 }
 
+/* ========================= Onglet EFFECTIFS ========================= */
+const POS_FR = { Goalkeeper: "Gardien", Defence: "Défenseur", Midfield: "Milieu", Offence: "Attaquant", "Centre-Back": "Déf. central", "Right-Back": "Arrière droit", "Left-Back": "Arrière gauche", "Defensive Midfield": "Milieu déf.", "Central Midfield": "Milieu", "Attacking Midfield": "Milieu off.", "Centre-Forward": "Avant-centre", "Right Winger": "Ailier droit", "Left Winger": "Ailier gauche" };
+const posFr = (p) => POS_FR[p] || p || "—";
+function SquadsTab() {
+  const [league, setLeague] = useState("WC");
+  const [teams, setTeams] = useState([]);
+  const [sel, setSel] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [updated, setUpdated] = useState(null);
+  const load = async () => {
+    setLoading(true); setErr(null); setTeams([]);
+    try {
+      const r = await fetch("/api/stats?source=teams&league=" + league);
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
+      const d = await r.json();
+      if (!d.teams || !d.teams.length) throw new Error("Aucune équipe (compétition pas encore active ?)");
+      setTeams(d.teams); setSel(0); setUpdated(new Date());
+    } catch (e) { setErr(String(e.message || e)); setTeams([]); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [league]);
+  const age = (dob) => { if (!dob) return "—"; const d = new Date(dob); if (isNaN(d)) return "—"; const t = new Date(); let a = t.getFullYear() - d.getFullYear(); if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) a--; return a; };
+  const team = teams[sel];
+  return (
+    <>
+      <section className="pf-card">
+        <div className="pf-result-head"><Users size={15} /> Effectifs — football-data.org</div>
+        <div className="lv-ctrl">
+          <select value={league} onChange={(e) => setLeague(e.target.value)}>{SCORER_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
+          <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
+        </div>
+        {teams.length > 0 && <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.name} ({t.squad.length})</option>)}</select>}
+        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "Chargement…"}</div>
+        {err && <div className="lv-err">⚠️ {err}<br /><span>Nécessite <code>FOOTBALLDATA_TOKEN</code> (gratuit). Les effectifs du Mondial se renseignent à l'approche du tournoi.</span></div>}
+      </section>
+      {team && team.squad.length > 0 && (
+        <section className="pf-card">
+          <div className="pf-result-head">{team.name} · {team.squad.length} joueurs</div>
+          <table className="wc-st sc-tbl"><thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th></tr></thead>
+            <tbody>{team.squad.map((p, i) => (
+              <tr key={i}><td className="wc-tn">{p.name}</td><td className="sc-team-c">{posFr(p.position)}</td><td className="sc-team-c">{p.nationality || "—"}</td><td>{age(p.dob)}</td></tr>))}</tbody>
+          </table>
+          <div className="lv-meta">Source football-data.org (gratuit) : nom, poste, nationalité, âge. Compositions et blessures ne sont pas disponibles en gratuit.</div>
+        </section>)}
+    </>
+  );
+}
+
 /* ========================= App ========================= */
 export default function App() {
   const [tab, setTab] = useState("match");
@@ -776,9 +842,10 @@ export default function App() {
         <button className={tab === "cdm" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("cdm")}>Mondial 26</button>
         <button className={tab === "live" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("live")}>Live</button>
         <button className={tab === "scorers" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("scorers")}>Buteurs</button>
+        <button className={tab === "squads" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("squads")}>Effectifs</button>
       </nav>
       <main className="pf-main">
-        {tab === "match" ? <MatchTab /> : tab === "cdm" ? <WorldCupTab /> : tab === "live" ? <LiveTab /> : <ScorersTab />}
+        {tab === "match" ? <MatchTab /> : tab === "cdm" ? <WorldCupTab /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
         <footer className="pf-footer"><ShieldAlert size={14} /><span>Outil d'analyse pédagogique. Les paris comportent un risque de perte ; aucun modèle ne garantit de gain. Jeu excessif : <b>09 74 75 13 13</b> (Joueurs Info Service, appel non surtaxé).</span></footer>
       </main>
     </div>

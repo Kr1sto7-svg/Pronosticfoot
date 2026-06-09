@@ -17,6 +17,32 @@ export default async function handler(req, res) {
   const H = { "X-Auth-Token": token || "" };
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
+
+  /* ---- xG RÉEL via Understat (gratuit, sans clé) : 5 grands championnats ---- */
+  /* NB : Understat n'expose pas d'API officielle (JSON intégré au HTML) et ne
+     couvre PAS les sélections / la Coupe du Monde. À vérifier après déploiement. */
+  if (source === "understat") {
+    const MAP = { PL: "EPL", PD: "La_liga", BL1: "Bundesliga", SA: "Serie_A", FL1: "Ligue_1" };
+    const lg = MAP[league];
+    if (!lg) return res.status(200).json({ source, supported: false, teams: [], note: "xG Understat dispo seulement pour PL, PD, BL1, SA, FL1." });
+    const now = new Date(), season = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+    try {
+      const r = await fetch("https://understat.com/league/" + lg + "/" + season, { headers: { "User-Agent": "Mozilla/5.0" } });
+      const html = await r.text();
+      const m = html.match(/teamsData\s*=\s*JSON\.parse\('([^']+)'\)/);
+      if (!m) return res.status(200).json({ source, teams: [], note: "Parsing Understat impossible (structure changée ?)." });
+      const data = JSON.parse(decodeURIComponent(m[1].replace(/\\x/g, "%")));
+      const teams = Object.values(data).map((t) => {
+        const h = t.history || [];
+        const xg = h.reduce((s, g) => s + (+g.xG || 0), 0), xga = h.reduce((s, g) => s + (+g.xGA || 0), 0);
+        return { name: t.title, matches: h.length, xgFor: h.length ? xg / h.length : 0, xgAgainst: h.length ? xga / h.length : 0 };
+      });
+      return res.status(200).json({ source, league, season, count: teams.length, teams });
+    } catch (e) {
+      return res.status(200).json({ source, teams: [], note: "Understat injoignable : " + String(e.message || e) });
+    }
+  }
+
   if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {
@@ -92,6 +118,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ source, team: teamName, season, count: players.length, players });
     }
 
+    /* ---- APERÇU COMPÉTITION (saison, journée en cours) ---- */
+    if (source === "competition") {
+      if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+      const r = await fetch("https://api.football-data.org/v4/competitions/" + league, { headers: H });
+      const j = await r.json();
+      return res.status(200).json({
+        source, name: j.name, emblem: j.emblem, area: j.area ? j.area.name : "",
+        season: j.currentSeason ? { start: j.currentSeason.startDate, end: j.currentSeason.endDate, matchday: j.currentSeason.currentMatchday } : null,
+        updated: new Date().toISOString(),
+      });
+    }
+
+    /* ---- ÉQUIPES D'UNE COMPÉTITION + EFFECTIFS (gratuit) ---- */
+    if (source === "teams") {
+      if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
+      const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/teams", { headers: H });
+      const j = await r.json();
+      const teams = (j.teams || []).map((t) => ({
+        id: t.id, name: t.shortName || t.name, crest: t.crest,
+        squad: (t.squad || []).map((p) => ({ name: p.name, position: p.position || "", nationality: p.nationality || "", dob: p.dateOfBirth || "" })),
+      }));
+      return res.status(200).json({ source, league, count: teams.length, teams });
+    }
+
     /* ---- RÉSULTATS + PROCHAINS MATCHS d'une compétition ---- */
     if (source === "matches") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
@@ -104,6 +154,8 @@ export default async function handler(req, res) {
         home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
         homeGoals: m.score && m.score.fullTime ? m.score.fullTime.home : null,
         awayGoals: m.score && m.score.fullTime ? m.score.fullTime.away : null,
+        // Cotes UNIQUEMENT si l'API les fournit (sinon null : non incluses dans le tier gratuit).
+        odds: m.odds && typeof m.odds.homeWin === "number" ? { h: m.odds.homeWin, d: m.odds.draw, a: m.odds.awayWin } : null,
       });
       const finished = all.filter((m) => m.status === "FINISHED").sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate)).slice(0, 12).map(map);
       const upcoming = all.filter((m) => ["TIMED", "SCHEDULED"].includes(m.status)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate)).slice(0, 12).map(map);
