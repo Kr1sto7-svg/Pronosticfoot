@@ -12,6 +12,9 @@ import { ArrowLeftRight, ChevronDown, Info, Plug, ShieldAlert, TrendingUp, Troph
    ========================================================================= */
 
 const BASE_GOALS = 1.35, HOME_MULT = 1.18, AWAY_MULT = 0.92, RHO = -0.13, MAXG = 10;
+const FORM_DECAY = 0.75;
+const WC_AVG = 1.18;
+const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
 const LETTERS = "ABCDEFGHIJKL".split("");
 const GROUP_PAIRS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
 
@@ -88,7 +91,12 @@ const GROUPS_2026 = [
 /* ---------- maths ---------- */
 function factorial(k) { let r = 1; for (let i = 2; i <= k; i++) r *= i; return r; }
 function poisson(k, l) { return (Math.exp(-l) * Math.pow(l, k)) / factorial(k); }
-function formScore(form) { if (!form || !form.length) return 0; return form.reduce((s, r) => s + (r === "W" ? 1 : r === "L" ? -1 : 0), 0) / form.length; }
+function formScore(form) {
+  if (!form || !form.length) return 0;
+  let sum = 0, w = 0;
+  form.forEach((r, i) => { const wi = Math.pow(FORM_DECAY, form.length - 1 - i); sum += (r === "W" ? 1 : r === "L" ? -1 : 0) * wi; w += wi; });
+  return w ? sum / w : 0;
+}
 function dcTau(i, j, lh, la) {
   if (i === 0 && j === 0) return 1 - lh * la * RHO;
   if (i === 0 && j === 1) return 1 + lh * RHO;
@@ -96,11 +104,11 @@ function dcTau(i, j, lh, la) {
   if (i === 1 && j === 1) return 1 - RHO;
   return 1;
 }
-function predict(home, away, neutral) {
+function predict(home, away, neutral, leagueAvg = BASE_GOALS) {
   const fh = formScore(home.form), fa = formScore(away.form);
   const attH = home.att * (1 + 0.08 * fh), defH = home.def * (1 - 0.05 * fh);
   const attA = away.att * (1 + 0.08 * fa), defA = away.def * (1 - 0.05 * fa);
-  let lh = BASE_GOALS * attH * defA, la = BASE_GOALS * attA * defH;
+  let lh = leagueAvg * attH * defA, la = leagueAvg * attA * defH;
   if (!neutral) { lh *= HOME_MULT; la *= AWAY_MULT; }
   // Une seule distribution : produit de deux Poisson sur les buts attendus (xG).
   // Tout (1/N/2, +2,5, BTTS, scores) en découle -> cohérent, sans biais 1-1.
@@ -123,8 +131,8 @@ function predict(home, away, neutral) {
   return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores, topHome: bH, topDraw: bD, topAway: bA };
 }
 // Match à élimination directe : prolongation (30') puis tirs au but si nul après 90'.
-function predictKnockout(home, away) {
-  const base = predict(home, away, true);
+function predictKnockout(home, away, leagueAvg = BASE_GOALS) {
+  const base = predict(home, away, true, leagueAvg);
   const lhE = base.lh / 3, laE = base.la / 3; // ~30 min = 1/3 de match
   let etA = 0, etB = 0, etD = 0;
   for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
@@ -161,8 +169,8 @@ function h2hEmpirical(homeName, meetings) {
   return n ? { n, pH: hw / n, pD: d / n, pA: aw / n } : null;
 }
 // 1/N/2 enrichi : forces de la saison + forme récente (via predict) + confrontations directes.
-function predictWithHistory(home, away, meetings) {
-  const base = predict(home, away, true); // home/away portent déjà leur forme récente
+function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS) {
+  const base = predict(home, away, true, leagueAvg);
   const emp = meetings && meetings.length ? h2hEmpirical(home.name, meetings) : null;
   if (!emp || emp.n < 3) return { R: base, h2hN: emp ? emp.n : 0, w: 0 };
   const w = Math.min(0.22, emp.n * 0.035); // poids croissant, plafonné (le H2H reste peu fiable)
@@ -172,6 +180,7 @@ function parseOdds(s) { const v = parseFloat(String(s).replace(",", ".")); retur
 function fairProbs(o1, ox, o2) { const a = parseOdds(o1), b = parseOdds(ox), c = parseOdds(o2); if (!a || !b || !c) return null; const i1 = 1/a, ix = 1/b, i2 = 1/c, s = i1+ix+i2; return { p1: i1/s, px: ix/s, p2: i2/s, margin: s-1 }; }
 const pct = (x) => (x * 100).toFixed(1);
 const short = (n) => n.length > 11 ? n.slice(0, 10) + "." : n;
+const normName = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(fc|cf|afc|ac|ssc|rc|as|sc|cd|ca|sv|bk)\b/g, "").replace(/[^a-z]/g, "");
 
 /* ---------- tournoi ---------- */
 function defaultGroups() {
@@ -214,7 +223,7 @@ function groupTable(group, gi, results) {
   return [...rows].sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo);
 }
 function seedOrder(n) { let p = [1, 2]; while (p.length < n) { const s = p.length * 2 + 1, nx = []; for (const x of p) { nx.push(x); nx.push(s - x); } p = nx; } return p; }
-function buildKnockout(eff, qualRanked, ko, results) {
+function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS) {
   const order = seedOrder(32);
   const slots = order.map((s) => qualRanked[s - 1] ?? null);
   let ties = []; for (let k = 0; k < 16; k++) ties.push([slots[2 * k], slots[2 * k + 1]]);
@@ -227,7 +236,7 @@ function buildKnockout(eff, qualRanked, ko, results) {
       const id = name + "-" + k;
       let prob = 0.5, winner = null, decided = false, kb = null;
       if (a != null && b != null) {
-        kb = predictKnockout(eff[a], eff[b]);
+        kb = predictKnockout(eff[a], eff[b], leagueAvg);
         prob = kb.advA;
         const m = ko[id], sc = results[id];
         if (m != null) { winner = m; decided = true; }
@@ -396,7 +405,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore }) {
           const id = "G" + LETTERS[gi] + "-" + x + "-" + y, r = results[id] || {};
           const ta = POOL[group[x]], tb = POOL[group[y]];
           const done = r.hg != null && r.ag != null;
-          const p = !done ? predict(eff[group[x]], eff[group[y]], true) : null;
+          const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG) : null;
           return (<div key={id} className="wc-m">
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
               <span className="wc-mscore"><ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} /></span>
@@ -473,7 +482,7 @@ function WorldCupTab() {
     const rank = [...qualRows]
       .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo)
       .map((r) => r.ti);
-    const rounds = buildKnockout(eff, rank, ko, results);
+    const rounds = buildKnockout(eff, rank, ko, results, WC_AVG);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
   }, [groups, results, ko]);
@@ -543,8 +552,10 @@ function LiveTab() {
   const [err, setErr] = useState(null);
   const [updated, setUpdated] = useState(null);
   const [xgOn, setXgOn] = useState(false);
+  const [leagueAvg, setLeagueAvg] = useState(BASE_GOALS);
   const load = async () => {
     setLoading(true); setErr(null);
+    setLeagueAvg(LEAGUE_GOALS_AVG[league] || BASE_GOALS);
     try {
       // pas de paramètre season -> football-data.org renvoie la saison EN COURS
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
@@ -557,7 +568,7 @@ function LiveTab() {
         const xr = await fetch("/api/stats?source=understat&league=" + league);
         const xd = await xr.json();
         if (xd.teams && xd.teams.length) {
-          const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(fc|cf|afc|ac|ssc|rc|as|sc)\b/g, "").replace(/[^a-z]/g, "");
+          const norm = normName;
           const clampR = (x) => Math.max(0.6, Math.min(1.7, x));
           const byN = {}; xd.teams.forEach((t) => (byN[norm(t.name)] = t));
           tm = tm.map((t) => {
@@ -567,7 +578,7 @@ function LiveTab() {
           });
         }
       } catch { /* repli silencieux sur les forces basées sur les buts */ }
-      setTeams(tm); setXgOn(xgActive); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
+      setTeams(tm); setXgOn(xgActive); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
@@ -577,9 +588,11 @@ function LiveTab() {
   const [h2hMsg, setH2hMsg] = useState("");
   const [fin, setFin] = useState([]);
   const [up, setUp] = useState([]);
+  const [odds, setOdds] = useState([]);
+  const [oddsNote, setOddsNote] = useState("");
   const ta = teams[a], tb = teams[b];
   const hist = ta && tb && a !== b
-    ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h)
+    ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h, leagueAvg)
     : null;
   const R = hist ? hist.R : null;
   useEffect(() => {
@@ -598,11 +611,32 @@ function LiveTab() {
       .catch(() => {});
     return () => { on = false; };
   }, [league]);
+  useEffect(() => {
+    let on = true; setOdds([]); setOddsNote("");
+    fetch("/api/stats?source=odds&league=" + league)
+      .then((r) => r.json()).then((d) => { if (!on) return; setOdds(d.events || []); if (!(d.events || []).length) setOddsNote(d.note || ""); })
+      .catch(() => { if (on) setOddsNote("Cotes indisponibles."); });
+    return () => { on = false; };
+  }, [league]);
   const byId = (id) => teams.find((t) => t.id === id);
+  const byName = (n) => teams.find((t) => normName(t.name) === normName(n));
   const fixtureProbs = (m) => {
     const hh = byId(m.homeId), aw = byId(m.awayId);
     if (!hh || !aw) return null;
-    return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, true);
+    return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, true, leagueAvg);
+  };
+  // Value = proba modèle × meilleure cote. > 1,05 -> le modèle voit de la valeur.
+  const oddsValue = (ev) => {
+    const hh = byName(ev.home), aw = byName(ev.away);
+    if (!hh || !aw) return null;
+    const p = predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg);
+    const v = [
+      { k: "1", lbl: short(ev.home), ev: p.pH * ev.oddsH, pm: p.pH },
+      { k: "N", lbl: "Nul", ev: p.pD * ev.oddsD, pm: p.pD },
+      { k: "2", lbl: short(ev.away), ev: p.pA * ev.oddsA, pm: p.pA },
+    ];
+    const best = v.reduce((a, b) => (b.ev > a.ev ? b : a));
+    return { p, best, value: best.ev > 1.05 };
   };
   return (
     <>
@@ -650,6 +684,24 @@ function LiveTab() {
               {p ? <span className="up-p">{pct(p.pH)}/{pct(p.pD)}/{pct(p.pA)}</span> : <span className="up-p">—</span>}
             </div>); })}</div>
         </section>)}
+        <section className="pf-card">
+          <div className="pf-result-head"><TrendingUp size={15} /> Cotes & value (multi-bookmakers)</div>
+          {odds.length > 0 ? (
+            <div className="res">{odds.map((ev, i) => { const vv = oddsValue(ev); return (
+              <div key={i} className="odd-row">
+                <div className="odd-line"><span className="res-d">{(ev.date || "").slice(5, 10)}</span>
+                  <span className="res-m">{short(ev.home)} – {short(ev.away)}</span>
+                  {vv && vv.value && <span className="odd-val">value {vv.best.k}</span>}</div>
+                <div className="odd-cotes">
+                  <span className="odd-c"><i>1</i> {ev.oddsH ? ev.oddsH.toFixed(2) : "—"}<u>{ev.bookH}</u></span>
+                  <span className="odd-c"><i>N</i> {ev.oddsD ? ev.oddsD.toFixed(2) : "—"}<u>{ev.bookD}</u></span>
+                  <span className="odd-c"><i>2</i> {ev.oddsA ? ev.oddsA.toFixed(2) : "—"}<u>{ev.bookA}</u></span>
+                </div>
+                {vv && <div className="odd-model">modèle {pct(vv.p.pH)}/{pct(vv.p.pD)}/{pct(vv.p.pA)} · meilleure attente : {vv.best.lbl} ({vv.best.ev.toFixed(2)}× la mise)</div>}
+              </div>); })}</div>
+          ) : <div className="lv-meta">{oddsNote || "Aucune cote (ajoute ODDS_API_KEY sur Vercel, et vérifie que ton plan couvre le football)."}</div>}
+          <div className="lv-meta">Cotes les plus élevées trouvées chez les bookmakers (regions EU). « value » = le modèle estime un rendement &gt; 1 sur cette issue — un signal, jamais une certitude.</div>
+        </section>
         {fin.length > 0 && (
         <section className="pf-card">
           <div className="pf-result-head">Derniers résultats <span className="res-live">MAJ auto</span></div>
@@ -1024,4 +1076,12 @@ const CSS = `
 .res-m{flex:1;font-size:12.5px;}.res-m b{font-family:'JetBrains Mono';color:var(--lime);margin:0 4px;}
 .up-p{font-family:'JetBrains Mono';font-size:10.5px;color:var(--cyan);flex-shrink:0;}
 .res-live{font-family:'Saira Condensed';font-size:9px;background:var(--red);color:#fff;border-radius:5px;padding:1px 6px;letter-spacing:.05em;}
+.odd-row{background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:6px;}
+.odd-line{display:flex;align-items:center;gap:9px;}
+.odd-val{font-family:'Saira Condensed';font-size:9px;background:var(--lime);color:#0b0d10;border-radius:5px;padding:1px 6px;letter-spacing:.05em;margin-left:auto;}
+.odd-cotes{display:flex;gap:8px;margin-top:6px;}
+.odd-c{flex:1;display:flex;flex-direction:column;align-items:center;background:#15191f;border:1px solid var(--line);border-radius:8px;padding:5px 3px;font-family:'JetBrains Mono';font-size:13px;font-weight:700;color:var(--txt);}
+.odd-c i{font-style:normal;font-size:9px;color:var(--dim);font-weight:500;}
+.odd-c u{text-decoration:none;font-size:8.5px;color:var(--dim);font-weight:500;font-family:'Saira Condensed';margin-top:1px;}
+.odd-model{font-family:'JetBrains Mono';font-size:9.5px;color:var(--dim);margin-top:5px;}
 `;

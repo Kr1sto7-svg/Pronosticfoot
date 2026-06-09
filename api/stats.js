@@ -43,6 +43,37 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---- COTES MULTI-BOOKMAKERS via The Odds API (clé gratuite the-odds-api.com) ---- */
+  if (source === "odds") {
+    const key = process.env.ODDS_API_KEY;
+    if (!key) return res.status(500).json({ error: "ODDS_API_KEY non configurée (clé the-odds-api.com)" });
+    const SK = { FL1: "soccer_france_ligue_one", PL: "soccer_epl", PD: "soccer_spain_la_liga", SA: "soccer_italy_serie_a", BL1: "soccer_germany_bundesliga", CL: "soccer_uefa_champs_league", WC: "soccer_fifa_world_cup" };
+    const sk = SK[league];
+    if (!sk) return res.status(200).json({ source, events: [], note: "Cotes non disponibles pour cette compétition." });
+    try {
+      const u = "https://api.the-odds-api.com/v4/sports/" + sk + "/odds?regions=eu&markets=h2h&oddsFormat=decimal&apiKey=" + key;
+      const r = await fetch(u);
+      if (!r.ok) return res.status(200).json({ source, events: [], note: "API cotes indisponible (HTTP " + r.status + ") — vérifie que ton plan couvre le football." });
+      const data = await r.json();
+      const events = (Array.isArray(data) ? data : []).map((ev) => {
+        let bh = 0, bd = 0, ba = 0, sh = "", sd = "", sa = "";
+        (ev.bookmakers || []).forEach((bk) => {
+          const mk = (bk.markets || []).find((m) => m.key === "h2h"); if (!mk) return;
+          (mk.outcomes || []).forEach((o) => {
+            if (o.name === ev.home_team && o.price > bh) { bh = o.price; sh = bk.title; }
+            else if (o.name === ev.away_team && o.price > ba) { ba = o.price; sa = bk.title; }
+            else if (o.name === "Draw" && o.price > bd) { bd = o.price; sd = bk.title; }
+          });
+        });
+        const ih = bh ? 1 / bh : 0, idr = bd ? 1 / bd : 0, ia = ba ? 1 / ba : 0, s = ih + idr + ia || 1;
+        return { id: ev.id, date: ev.commence_time, home: ev.home_team, away: ev.away_team, oddsH: bh, oddsD: bd, oddsA: ba, bookH: sh, bookD: sd, bookA: sa, impH: ih / s, impD: idr / s, impA: ia / s };
+      });
+      return res.status(200).json({ source, league, count: events.length, updated: new Date().toISOString(), events });
+    } catch (e) {
+      return res.status(200).json({ source, events: [], note: "Cotes injoignables : " + String(e.message || e) });
+    }
+  }
+
   if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {
