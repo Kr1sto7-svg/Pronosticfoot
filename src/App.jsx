@@ -73,6 +73,21 @@ const POOL = [
   { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
 
+/* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
+const FIFA_RANK = {
+  "Argentine":1,"France":2,"Espagne":3,"Angleterre":4,"Brésil":5,
+  "Portugal":6,"Pays-Bas":7,"Belgique":8,"Allemagne":9,"Croatie":10,
+  "Uruguay":11,"Colombie":12,"Maroc":13,"Norvège":15,"États-Unis":16,
+  "Mexique":17,"Japon":18,"Sénégal":19,"Suisse":20,"Autriche":21,
+  "Corée du Sud":23,"Tchéquie":24,"Côte d'Ivoire":25,"Turquie":26,
+  "Équateur":27,"Suède":28,"Algérie":29,"Canada":30,"Écosse":31,
+  "Iran":32,"Australie":33,"RD Congo":34,"Égypte":35,"Tunisie":36,
+  "Paraguay":38,"Bosnie-Herzégovine":40,"Ghana":43,"Panama":48,
+  "Afrique du Sud":50,"Ouzbékistan":55,"Arabie saoudite":56,"Qatar":58,
+  "Jordanie":62,"Irak":66,"Cap-Vert":70,"Haïti":80,"Curaçao":88,
+  "Nouvelle-Zélande":96,
+};
+
 /* Tirage OFFICIEL de la Coupe du Monde 2026 (groupes A à L). */
 const GROUPS_2026 = [
   ["Mexique", "Corée du Sud", "Afrique du Sud", "Tchéquie"],
@@ -243,8 +258,8 @@ function eloAfterGroups(groups, results) {
   });
   return elo;
 }
-function effectivePool(stats, eloArr) {
-  return POOL.map((t, i) => {
+function effectivePool(stats, eloArr, basePool = POOL) {
+  return basePool.map((t, i) => {
     const s = stats[i];
     const newElo = eloArr ? eloArr[i] : t.elo;
     if (!s.gp) return { ...t, elo: newElo };
@@ -343,12 +358,25 @@ function EdgeRow({ label, model, fair, edge }) {
 }
 
 /* ========================= Onglet MATCH ========================= */
-function MatchTab() {
+function MatchTab({ intlMatches = [] }) {
   const [h, setH] = useState(0), [a, setA] = useState(1), [neutral, setNeutral] = useState(true);
   const [o1, setO1] = useState(""), [ox, setOx] = useState(""), [o2, setO2] = useState("");
   const [openHow, setOpenHow] = useState(false), [openApi, setOpenApi] = useState(false);
-  const home = POOL[h], away = POOL[a], same = h === a;
-  const R = useMemo(() => (same ? null : predict(home, away, neutral, WC_AVG, LEAGUE_RHO.WC)), [h, a, neutral]);
+  const adjPool = useMemo(() => adjustPoolWithIntl(intlMatches), [intlMatches]);
+  const home = adjPool[h], away = adjPool[a], same = h === a;
+  const h2h = useMemo(() => getH2HFromIntl(intlMatches, POOL[h].n, POOL[a].n), [h, a, intlMatches]);
+  const R = useMemo(() => {
+    if (same) return null;
+    const p = predict(home, away, neutral, WC_AVG, LEAGUE_RHO.WC);
+    if (h2h.length < 2) return p;
+    let hw = 0, dr = 0, aw = 0;
+    h2h.forEach((m) => { if (m.hg > m.ag) hw++; else if (m.hg < m.ag) aw++; else dr++; });
+    const n = hw + dr + aw; if (!n) return p;
+    const w = Math.min(0.20, n * 0.04);
+    const pH = (p.pH * (1 - w) + (hw / n) * w), pD = (p.pD * (1 - w) + (dr / n) * w), pA = (p.pA * (1 - w) + (aw / n) * w);
+    const s = pH + pD + pA || 1;
+    return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
+  }, [h, a, neutral, adjPool, h2h]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
@@ -360,6 +388,7 @@ function MatchTab() {
         <label className="pf-neutral"><input type="checkbox" checked={neutral} onChange={(e) => setNeutral(e.target.checked)} /><span>Terrain neutre (tournoi)</span></label>
       </section>
       {same && <div className="pf-warn">Choisis deux équipes différentes.</div>}
+      {R && R.h2hN > 0 && <div className="pf-h2h-badge">🔁 {R.h2hN} confrontation{R.h2hN > 1 ? "s" : ""} directe{R.h2hN > 1 ? "s" : ""} prise{R.h2hN > 1 ? "s" : ""} en compte</div>}
       {R && (<>
         <section className="pf-card">
           <div className="pf-result-head">Probabilités du résultat</div>
@@ -490,6 +519,9 @@ function KnockoutTie({ tie, eff, onPick }) {
     const favA = kb.advA >= kb.advB, fav = favA ? A : B;
     bd = { fav, advP: favA ? kb.advA : kb.advB, reg: favA ? kb.regA : kb.regB, et: favA ? kb.etA : kb.etB, pen: favA ? kb.penA : kb.penB };
   }
+  const teamA = (eff && tie.a != null) ? eff[tie.a] : A;
+  const teamB = (eff && tie.b != null) ? eff[tie.b] : B;
+  const p = (!tie.decided && teamA && teamB) ? predict(teamA, teamB, true, WC_AVG, LEAGUE_RHO.WC) : null;
   return (
     <div className="wc-tie">
       <div className="wc-tie-sides">
@@ -501,6 +533,17 @@ function KnockoutTie({ tie, eff, onPick }) {
         </button>
       </div>
       {bd && !tie.decided && <div className="wc-kb">{short(bd.fav.n)} qualif. <b>{pct(bd.advP)}%</b> · 90′ {pct(bd.reg)}% · prol. {pct(bd.et)}% · t.a.b. {pct(bd.pen)}%</div>}
+      {p && <div className="wc-pred">
+        <span className={"wc-pc" + (p.pH >= p.pD && p.pH >= p.pA ? " wc-pc-top" : "")}>
+          <b>1 · {pct(p.pH)}%</b><em>{p.topHome.s}</em>
+        </span>
+        <span className={"wc-pc" + (p.pD >= p.pH && p.pD >= p.pA ? " wc-pc-top" : "")}>
+          <b>N · {pct(p.pD)}%</b><em>{p.topDraw.s}</em>
+        </span>
+        <span className={"wc-pc" + (p.pA > p.pH && p.pA > p.pD ? " wc-pc-top" : "")}>
+          <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
+        </span>
+      </div>}
       <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.decided ? "réel" : "projeté"}</span>
     </div>
   );
@@ -515,7 +558,7 @@ function RoundBlock({ round, eff, onPick, defaultOpen }) {
     </div>
   );
 }
-function WorldCupTab() {
+function WorldCupTab({ intlMatches = [] }) {
   const [view, setView] = useState("groups");
   const [groups, setGroups] = useState(defaultGroups);
   const [results, setResults] = useState({});
@@ -575,10 +618,11 @@ function WorldCupTab() {
   const effectiveResults = useMemo(() => ({ ...apiMapped, ...results }), [apiMapped, results]);
   const liveIds = useMemo(() => new Set(Object.keys(apiMapped).filter((id) => !results[id])), [apiMapped, results]);
 
+  const adjPool = useMemo(() => adjustPoolWithIntl(intlMatches), [intlMatches]);
   const wc = useMemo(() => {
     const stats = tournamentStats(groups, effectiveResults);
     const eloArr = eloAfterGroups(groups, effectiveResults);
-    const eff = effectivePool(stats, eloArr);
+    const eff = effectivePool(stats, eloArr, adjPool);
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
@@ -591,7 +635,7 @@ function WorldCupTab() {
     const rounds = buildKnockout(eff, rank, ko, effectiveResults, WC_AVG, LEAGUE_RHO.WC);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, effectiveResults, ko]);
+  }, [groups, effectiveResults, ko, adjPool]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   const onScore = (id, side, val) => {
@@ -852,6 +896,45 @@ const EN_TO_FR_NORM = (() => {
   Object.entries(NAT_EN).forEach(([fr, en]) => { m[normName(en)] = fr; });
   return m;
 })();
+
+// Ajuste att/def/elo du pool avec classement FIFA + résultats internationaux récents.
+function adjustPoolWithIntl(intlMatches) {
+  const clamp = (x) => Math.max(0.6, Math.min(1.8, x));
+  const formMap = {};
+  for (const m of intlMatches) {
+    if (m.hg == null || m.ag == null) continue;
+    const hFr = EN_TO_FR_NORM[normName(m.home)], aFr = EN_TO_FR_NORM[normName(m.away)];
+    if (hFr) { if (!formMap[hFr]) formMap[hFr] = { gf: 0, ga: 0, gp: 0 }; formMap[hFr].gf += m.hg; formMap[hFr].ga += m.ag; formMap[hFr].gp++; }
+    if (aFr) { if (!formMap[aFr]) formMap[aFr] = { gf: 0, ga: 0, gp: 0 }; formMap[aFr].gf += m.ag; formMap[aFr].ga += m.hg; formMap[aFr].gp++; }
+  }
+  return POOL.map((t) => {
+    const rank = FIFA_RANK[t.n] || 70;
+    // Elo ajusté : 60% elo actuel + 40% elo dérivé du rang FIFA (rang 1→2100, rang 100→1400)
+    const rankElo = Math.round(2100 - 7 * (rank - 1));
+    const elo = Math.round(0.6 * t.elo + 0.4 * rankElo);
+    const form = formMap[t.n];
+    if (!form || form.gp < 3) return { ...t, elo };
+    const w = Math.min(0.28, 0.055 * form.gp);
+    const attObs = clamp((form.gf / form.gp) / WC_AVG);
+    const defObs = clamp((form.ga / form.gp) / WC_AVG);
+    return { ...t, elo, att: clamp(Math.pow(t.att, 1 - w) * Math.pow(attObs, w)), def: clamp(Math.pow(t.def, 1 - w) * Math.pow(defObs, w)) };
+  });
+}
+
+// Extrait les confrontations directes depuis les matchs internationaux (vue depuis homeN).
+function getH2HFromIntl(intlMatches, homeN, awayN) {
+  return intlMatches
+    .filter((m) => {
+      const h = EN_TO_FR_NORM[normName(m.home)], a = EN_TO_FR_NORM[normName(m.away)];
+      return (h === homeN && a === awayN) || (h === awayN && a === homeN);
+    })
+    .slice(0, 8)
+    .map((m) => {
+      const h = EN_TO_FR_NORM[normName(m.home)];
+      return h === homeN ? { hg: m.hg, ag: m.ag } : { hg: m.ag, ag: m.hg };
+    });
+}
+
 function ScorersTab() {
   const [mode, setMode] = useState("comp");
   // mode compétition (football-data.org)
@@ -1061,6 +1144,10 @@ function SquadsTab() {
 /* ========================= App ========================= */
 export default function App() {
   const [tab, setTab] = useState("match");
+  const [intlMatches, setIntlMatches] = useState([]);
+  useEffect(() => {
+    fetch("/api/stats?source=intl").then((r) => r.json()).then((d) => setIntlMatches(d.matches || [])).catch(() => {});
+  }, []);
   return (
     <div className="pf-root">
       <style>{CSS}</style>
@@ -1076,7 +1163,7 @@ export default function App() {
         <button className={tab === "squads" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("squads")}>Effectifs</button>
       </nav>
       <main className="pf-main">
-        {tab === "match" ? <MatchTab /> : tab === "cdm" ? <WorldCupTab /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
+        {tab === "match" ? <MatchTab intlMatches={intlMatches} /> : tab === "cdm" ? <WorldCupTab intlMatches={intlMatches} /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
         <footer className="pf-footer"><ShieldAlert size={14} /><span>Outil d'analyse pédagogique. Les paris comportent un risque de perte ; aucun modèle ne garantit de gain. Jeu excessif : <b>09 74 75 13 13</b> (Joueurs Info Service, appel non surtaxé).</span></footer>
       </main>
     </div>
@@ -1200,6 +1287,7 @@ const CSS = `
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
+.pf-h2h-badge{font-size:11px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:8px;padding:6px 12px;text-align:center;margin-bottom:6px;}
 .wc-pc{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 4px;border-radius:7px;background:#1b1f25;flex:1;min-width:0;}
 .wc-pc b{font-size:10px;color:var(--dim);font-weight:700;white-space:nowrap;}
 .wc-pc em{font-style:normal;font-family:'JetBrains Mono';font-size:12px;color:#c4cbd4;font-weight:700;}

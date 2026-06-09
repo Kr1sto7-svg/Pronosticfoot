@@ -194,6 +194,38 @@ export default async function handler(req, res) {
       return res.status(200).json({ source, league, updated: new Date().toISOString(), finished: (noLimit ? finished : finished.slice(0, 12)).map(map), upcoming: (noLimit ? upcoming : upcoming.slice(0, 12)).map(map) });
     }
 
+    /* ---- RÉSULTATS INTERNATIONAUX (WC + EC multi-saisons pour H2H et forme) ---- */
+    if (source === "intl") {
+      const mapM = (m, comp) => {
+        const hg = m.score?.fullTime?.home, ag = m.score?.fullTime?.away;
+        if (hg == null || ag == null) return null;
+        return {
+          date: m.utcDate, comp,
+          home: m.homeTeam.shortName || m.homeTeam.name,
+          away: m.awayTeam.shortName || m.awayTeam.name,
+          homeId: m.homeTeam.id, awayId: m.awayTeam.id,
+          hg, ag,
+        };
+      };
+      const endpoints = [
+        ["WC26", "https://api.football-data.org/v4/competitions/WC/matches?status=FINISHED"],
+        ["WC22", "https://api.football-data.org/v4/competitions/WC/matches?status=FINISHED&season=2022"],
+        ["EC24", "https://api.football-data.org/v4/competitions/EC/matches?status=FINISHED&season=2024"],
+        ["EC20", "https://api.football-data.org/v4/competitions/EC/matches?status=FINISHED&season=2020"],
+      ];
+      const all = [];
+      await Promise.all(endpoints.map(async ([comp, url]) => {
+        try {
+          const r = await fetch(url, { headers: H });
+          if (!r.ok) return;
+          const d = await r.json();
+          for (const m of (d.matches || [])) { const mm = mapM(m, comp); if (mm) all.push(mm); }
+        } catch {}
+      }));
+      all.sort((a, b) => new Date(b.date) - new Date(a.date));
+      return res.status(200).json({ source: "intl", count: all.length, matches: all });
+    }
+
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
     if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
     const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/standings", { headers: H });
