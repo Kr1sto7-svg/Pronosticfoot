@@ -137,7 +137,12 @@ function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
   scores.forEach((s) => (s.p /= total)); bH.p /= total; bD.p /= total; bA.p /= total;
   scores.sort((a, b) => b.p - a.p);
   const topScores = scores.slice(0, 6);
-  return { lh, la, pH, pD, pA, over25, btts, score: topScores[0].s, scoreP: topScores[0].p, topScores, topHome: bH, topDraw: bD, topAway: bA };
+  // Score prédit = meilleur score dans la catégorie la plus probable (évite le biais 1-1 du dcTau)
+  let score, scoreP;
+  if (pH >= pD && pH >= pA && bH.s) { score = bH.s; scoreP = bH.p; }
+  else if (pA > pH && pA >= pD && bA.s) { score = bA.s; scoreP = bA.p; }
+  else { score = bD.s || topScores[0].s; scoreP = bD.p || topScores[0].p; }
+  return { lh, la, pH, pD, pA, over25, btts, score, scoreP, topScores, topHome: bH, topDraw: bD, topAway: bA };
 }
 // Match à élimination directe : prolongation (30') puis tirs au but si nul après 90'.
 function predictKnockout(home, away, leagueAvg = BASE_GOALS, rho = RHO) {
