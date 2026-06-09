@@ -5,7 +5,7 @@ const TOKEN = process.env.GITHUB_TOKEN;
 const OWNER = "Kr1sto7-svg";
 const REPO = "Pronosticfoot";
 const BASE = process.cwd();
-const IGNORE = new Set(["node_modules", "dist", ".git", ".vercel", "push-to-github.mjs"]);
+const IGNORE = new Set(["node_modules", "dist", ".git", ".vercel", ".claude", "push-to-github.mjs"]);
 
 if (!TOKEN) {
   console.error('\n❌  GITHUB_TOKEN manquant.\n   Lance d\'abord :\n   $env:GITHUB_TOKEN = "ghp_ton_token_ici"\n   puis relance le script.\n');
