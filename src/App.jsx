@@ -346,7 +346,9 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore }) {
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
               <span className="wc-mscore"><ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} /></span>
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
-            {p && <div className="wc-mp">modèle {pct(p.pH)} / {pct(p.pD)} / {pct(p.pA)} · score {p.score}</div>}
+            {p && <div className="wc-mp">1/N/2 : {pct(p.pH)} / {pct(p.pD)} / {pct(p.pA)}</div>}
+            {p && <div className="wc-mscores">{p.topScores.slice(0, 3).map((s, k) => (
+              <span key={k} className={"wc-sc" + (k === 0 ? " wc-sc-top" : "")}>{s.s} <b>{pct(s.p)}%</b></span>))}</div>}
           </div>);
         })}</div>
       </div>)}
@@ -458,6 +460,17 @@ const LIVE_LEAGUES = [
   { code: "DED", n: "Eredivisie 🇳🇱" },
   { code: "CL", n: "Ligue des Champions 🏆" },
 ];
+/* Pour l'onglet Buteurs : clubs + sélections nationales (football-data.org). */
+const SCORER_LEAGUES = [
+  { code: "WC", n: "Coupe du Monde 2026 🌍" },
+  { code: "EC", n: "Euro (sélections) 🇪🇺" },
+  { code: "FL1", n: "Ligue 1 🇫🇷" },
+  { code: "PL", n: "Premier League 🏴" },
+  { code: "PD", n: "La Liga 🇪🇸" },
+  { code: "SA", n: "Serie A 🇮🇹" },
+  { code: "BL1", n: "Bundesliga 🇩🇪" },
+  { code: "CL", n: "Ligue des Champions 🏆" },
+];
 function LiveTab() {
   const [league, setLeague] = useState("FL1");
   const [teams, setTeams] = useState([]);
@@ -540,7 +553,7 @@ function LiveTab() {
 
 /* ========================= Onglet BUTEURS ========================= */
 function ScorersTab() {
-  const [league, setLeague] = useState("FL1");
+  const [league, setLeague] = useState("WC");
   const [players, setPlayers] = useState([]);
   const [team, setTeam] = useState("Toutes");
   const [loading, setLoading] = useState(false);
@@ -565,7 +578,7 @@ function ScorersTab() {
       <section className="pf-card">
         <div className="pf-result-head"><Target size={15} /> Buteurs & passeurs — saison en cours</div>
         <div className="lv-ctrl">
-          <select value={league} onChange={(e) => setLeague(e.target.value)}>{LIVE_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
+          <select value={league} onChange={(e) => setLeague(e.target.value)}>{SCORER_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
           <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
         </div>
         {players.length > 0 && <select className="sc-team" value={team} onChange={(e) => setTeam(e.target.value)}>{teamsList.map((t, i) => <option key={i} value={t}>{t === "Toutes" ? "Toutes les équipes" : t}</option>)}</select>}
@@ -719,6 +732,10 @@ const CSS = `
 .wc-score{width:34px;height:32px;background:#15181d;border:1px solid var(--line);border-radius:8px;color:var(--txt);font-family:'JetBrains Mono';font-weight:700;font-size:16px;text-align:center;outline:none;}
 .wc-score:focus{border-color:var(--cyan);}
 .wc-mp{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);margin-top:5px;text-align:center;}
+.wc-mscores{display:flex;justify-content:center;gap:8px;margin-top:4px;flex-wrap:wrap;}
+.wc-sc{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);}
+.wc-sc b{color:#c4cbd4;font-weight:700;}
+.wc-sc-top{color:var(--lime);}.wc-sc-top b{color:var(--lime);}
 .wc-ties{padding:6px 13px 14px;display:flex;flex-direction:column;gap:8px;}
 .wc-tie{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .wc-side{display:flex;align-items:center;gap:7px;background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer;color:var(--txt);text-align:left;}
