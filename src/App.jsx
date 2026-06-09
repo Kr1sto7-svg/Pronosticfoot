@@ -90,7 +90,10 @@ function predict(home, away, neutral) {
     const p = M[i][j] / total;
     if (i > j) pH += p; else if (i === j) pD += p; else pA += p;
     if (i + j >= 3) over25 += p; if (i >= 1 && j >= 1) btts += p;
-    if (p > best.p) best = { i, j, p };
+    // Score le plus probable : Poisson BRUT (sans la sur-pondération Dixon-Coles
+    // des scores nuls, qui faisait sortir 1-1 presque tout le temps).
+    const praw = poisson(i, lh) * poisson(j, la);
+    if (praw > best.p) best = { i, j, p: praw };
   }
   return { lh, la, pH, pD, pA, over25, btts, score: best.i + "–" + best.j, scoreP: best.p };
 }
@@ -371,11 +374,13 @@ function WorldCupTab() {
     const tables = groups.map((g, gi) => groupTable(g, gi, results));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    const qualifiers = [];
-    tables.forEach((t) => { qualifiers.push(t[0]); qualifiers.push(t[1]); });
-    thirds.slice(0, 8).forEach((t) => qualifiers.push(t.ti));
-    const rank = qualifiers.map((ti) => { const row = tables.flat().find((r) => r.ti === ti); return { ti, ...row }; })
-      .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo).map((r) => r.ti);
+    // Lignes des qualifiés (objets {ti,pts,gd,gf}) — 2 par groupe + 8 meilleurs 3es.
+    const qualRows = [];
+    tables.forEach((t) => { qualRows.push(t[0], t[1]); });
+    thirds.slice(0, 8).forEach((th) => qualRows.push(th));
+    const rank = [...qualRows]
+      .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || POOL[b.ti].elo - POOL[a.ti].elo)
+      .map((r) => r.ti);
     const rounds = buildKnockout(eff, rank, ko, results);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
@@ -415,16 +420,20 @@ function WorldCupTab() {
 }
 
 /* ========================= Onglet LIVE (proxy temps réel) ========================= */
+/* Source : football-data.org -> saison EN COURS (gratuite, toujours à jour).
+ * Codes de compétitions football-data.org. */
 const LIVE_LEAGUES = [
-  { id: 61, n: "Ligue 1 🇫🇷" },
-  { id: 39, n: "Premier League 🏴" },
-  { id: 140, n: "La Liga 🇪🇸" },
-  { id: 135, n: "Serie A 🇮🇹" },
-  { id: 78, n: "Bundesliga 🇩🇪" },
+  { code: "FL1", n: "Ligue 1 🇫🇷" },
+  { code: "PL", n: "Premier League 🏴" },
+  { code: "PD", n: "La Liga 🇪🇸" },
+  { code: "SA", n: "Serie A 🇮🇹" },
+  { code: "BL1", n: "Bundesliga 🇩🇪" },
+  { code: "PPL", n: "Primeira Liga 🇵🇹" },
+  { code: "DED", n: "Eredivisie 🇳🇱" },
+  { code: "CL", n: "Ligue des Champions 🏆" },
 ];
 function LiveTab() {
-  const [league, setLeague] = useState(61);
-  const [season, setSeason] = useState(2023);
+  const [league, setLeague] = useState("FL1");
   const [teams, setTeams] = useState([]);
   const [a, setA] = useState(0), [b, setB] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -433,29 +442,29 @@ function LiveTab() {
   const load = async () => {
     setLoading(true); setErr(null);
     try {
-      const r = await fetch("/api/stats?source=apifootball&league=" + league + "&season=" + season);
+      // pas de paramètre season -> football-data.org renvoie la saison EN COURS
+      const r = await fetch("/api/stats?source=footballdata&league=" + league);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
-      if (!d.teams || !d.teams.length) throw new Error("Aucune donnée (saison non couverte par le plan ?)");
+      if (!d.teams || !d.teams.length) throw new Error("Aucune donnée (saison pas encore commencée ?)");
       setTeams(d.teams); setUpdated(new Date()); setA(0); setB(Math.min(1, d.teams.length - 1));
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, [league, season]);
-  useEffect(() => { if (!teams.length) return; const t = setInterval(load, 600000); return () => clearInterval(t); }, [teams.length, league, season]);
+  useEffect(() => { load(); }, [league]);
+  useEffect(() => { if (!teams.length) return; const t = setInterval(load, 600000); return () => clearInterval(t); }, [teams.length, league]);
   const ta = teams[a], tb = teams[b];
   const R = ta && tb && a !== b ? predict({ ...ta, form: [] }, { ...tb, form: [] }, true) : null;
   return (
     <>
       <section className="pf-card">
-        <div className="pf-result-head"><Radio size={15} /> Forces calculées en direct</div>
+        <div className="pf-result-head"><Radio size={15} /> Forces — saison en cours</div>
         <div className="lv-ctrl">
-          <select value={league} onChange={(e) => setLeague(Number(e.target.value))}>{LIVE_LEAGUES.map((l) => <option key={l.id} value={l.id}>{l.n}</option>)}</select>
-          <input className="lv-season" inputMode="numeric" value={season} onChange={(e) => setSeason(Number(e.target.value) || season)} />
+          <select value={league} onChange={(e) => setLeague(e.target.value)}>{LIVE_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
           <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
         </div>
-        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · cache 10 min" : "Chargement…"}</div>
-        {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> ne répond qu'une fois l'app déployée sur Vercel avec la clé API-Football configurée.</span></div>}
+        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
+        {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois l'app déployée sur Vercel avec <code>FOOTBALLDATA_TOKEN</code> configuré (jeton gratuit sur football-data.org).</span></div>}
       </section>
       {teams.length > 0 && (<>
         <section className="pf-card">
