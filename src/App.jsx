@@ -23,54 +23,54 @@ const GROUP_PAIRS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
  * Ratings att/def illustratifs (par niveau) ; ils se recalibrent dès que tu
  * saisis de vrais scores ou via l'onglet Live. */
 const POOL = [
-  { n: "Argentine", f: "🇦🇷", elo: 2090, att: 1.38, def: 0.74 },
-  { n: "France", f: "🇫🇷", elo: 2085, att: 1.40, def: 0.74 },
-  { n: "Espagne", f: "🇪🇸", elo: 2075, att: 1.42, def: 0.76 },
-  { n: "Brésil", f: "🇧🇷", elo: 2060, att: 1.40, def: 0.80 },
-  { n: "Angleterre", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 2035, att: 1.34, def: 0.74 },
-  { n: "Portugal", f: "🇵🇹", elo: 2030, att: 1.40, def: 0.82 },
-  { n: "Allemagne", f: "🇩🇪", elo: 1990, att: 1.34, def: 0.86 },
-  { n: "Pays-Bas", f: "🇳🇱", elo: 1985, att: 1.32, def: 0.84 },
-  { n: "Belgique", f: "🇧🇪", elo: 1955, att: 1.30, def: 0.90 },
-  { n: "Croatie", f: "🇭🇷", elo: 1940, att: 1.18, def: 0.86 },
-  { n: "Uruguay", f: "🇺🇾", elo: 1930, att: 1.22, def: 0.84 },
-  { n: "Colombie", f: "🇨🇴", elo: 1900, att: 1.20, def: 0.86 },
-  { n: "Maroc", f: "🇲🇦", elo: 1885, att: 1.16, def: 0.80 },
-  { n: "Norvège", f: "🇳🇴", elo: 1865, att: 1.30, def: 0.92 },
-  { n: "Sénégal", f: "🇸🇳", elo: 1850, att: 1.18, def: 0.84 },
-  { n: "Suisse", f: "🇨🇭", elo: 1840, att: 1.10, def: 0.86 },
-  { n: "Japon", f: "🇯🇵", elo: 1835, att: 1.20, def: 0.88 },
-  { n: "Autriche", f: "🇦🇹", elo: 1830, att: 1.18, def: 0.90 },
-  { n: "Équateur", f: "🇪🇨", elo: 1820, att: 1.10, def: 0.84 },
-  { n: "Turquie", f: "🇹🇷", elo: 1815, att: 1.20, def: 0.92 },
-  { n: "Mexique", f: "🇲🇽", elo: 1810, att: 1.16, def: 0.92 },
-  { n: "Tchéquie", f: "🇨🇿", elo: 1800, att: 1.14, def: 0.90 },
-  { n: "États-Unis", f: "🇺🇸", elo: 1800, att: 1.16, def: 0.92 },
-  { n: "Corée du Sud", f: "🇰🇷", elo: 1790, att: 1.14, def: 0.90 },
-  { n: "Suède", f: "🇸🇪", elo: 1785, att: 1.18, def: 0.92 },
-  { n: "Côte d'Ivoire", f: "🇨🇮", elo: 1775, att: 1.14, def: 0.90 },
-  { n: "Canada", f: "🇨🇦", elo: 1770, att: 1.14, def: 0.92 },
-  { n: "Algérie", f: "🇩🇿", elo: 1770, att: 1.16, def: 0.90 },
-  { n: "Iran", f: "🇮🇷", elo: 1760, att: 1.06, def: 0.86 },
-  { n: "Égypte", f: "🇪🇬", elo: 1760, att: 1.10, def: 0.90 },
-  { n: "Écosse", f: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", elo: 1760, att: 1.10, def: 0.90 },
-  { n: "RD Congo", f: "🇨🇩", elo: 1730, att: 1.14, def: 0.94 },
-  { n: "Ghana", f: "🇬🇭", elo: 1730, att: 1.12, def: 0.96 },
-  { n: "Paraguay", f: "🇵🇾", elo: 1740, att: 1.04, def: 0.92 },
-  { n: "Australie", f: "🇦🇺", elo: 1720, att: 1.04, def: 0.96 },
-  { n: "Afrique du Sud", f: "🇿🇦", elo: 1720, att: 1.08, def: 0.92 },
-  { n: "Bosnie-Herzégovine", f: "🇧🇦", elo: 1720, att: 1.12, def: 0.94 },
-  { n: "Tunisie", f: "🇹🇳", elo: 1710, att: 1.02, def: 0.90 },
-  { n: "Ouzbékistan", f: "🇺🇿", elo: 1680, att: 1.04, def: 0.94 },
-  { n: "Panama", f: "🇵🇦", elo: 1670, att: 1.02, def: 0.98 },
-  { n: "Qatar", f: "🇶🇦", elo: 1665, att: 0.98, def: 1.00 },
-  { n: "Arabie saoudite", f: "🇸🇦", elo: 1660, att: 0.98, def: 0.98 },
-  { n: "Jordanie", f: "🇯🇴", elo: 1660, att: 1.00, def: 0.94 },
-  { n: "Irak", f: "🇮🇶", elo: 1650, att: 0.98, def: 0.96 },
-  { n: "Cap-Vert", f: "🇨🇻", elo: 1640, att: 1.02, def: 0.98 },
-  { n: "Haïti", f: "🇭🇹", elo: 1600, att: 0.96, def: 1.02 },
-  { n: "Curaçao", f: "🇨🇼", elo: 1580, att: 0.92, def: 1.04 },
-  { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.92, def: 1.06 },
+  { n: "Argentine",        f: "🇦🇷", elo: 2090, att: 1.70, def: 0.68 },
+  { n: "France",           f: "🇫🇷", elo: 2085, att: 1.65, def: 0.72 },
+  { n: "Espagne",          f: "🇪🇸", elo: 2075, att: 1.70, def: 0.74 },
+  { n: "Brésil",           f: "🇧🇷", elo: 2060, att: 1.62, def: 0.72 },
+  { n: "Angleterre",       f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 2035, att: 1.55, def: 0.76 },
+  { n: "Portugal",         f: "🇵🇹", elo: 2030, att: 1.60, def: 0.84 },
+  { n: "Allemagne",        f: "🇩🇪", elo: 1990, att: 1.38, def: 0.84 },
+  { n: "Pays-Bas",         f: "🇳🇱", elo: 1985, att: 1.32, def: 0.82 },
+  { n: "Belgique",         f: "🇧🇪", elo: 1955, att: 1.28, def: 0.88 },
+  { n: "Croatie",          f: "🇭🇷", elo: 1940, att: 1.14, def: 0.84 },
+  { n: "Uruguay",          f: "🇺🇾", elo: 1930, att: 1.20, def: 0.84 },
+  { n: "Colombie",         f: "🇨🇴", elo: 1900, att: 1.16, def: 0.88 },
+  { n: "Maroc",            f: "🇲🇦", elo: 1885, att: 1.10, def: 0.76 },
+  { n: "Norvège",          f: "🇳🇴", elo: 1865, att: 1.28, def: 0.92 },
+  { n: "Sénégal",          f: "🇸🇳", elo: 1850, att: 1.10, def: 0.84 },
+  { n: "Suisse",           f: "🇨🇭", elo: 1840, att: 1.02, def: 0.90 },
+  { n: "Japon",            f: "🇯🇵", elo: 1835, att: 1.10, def: 0.92 },
+  { n: "Autriche",         f: "🇦🇹", elo: 1830, att: 1.10, def: 0.92 },
+  { n: "Équateur",         f: "🇪🇨", elo: 1820, att: 1.02, def: 0.84 },
+  { n: "Turquie",          f: "🇹🇷", elo: 1815, att: 1.10, def: 0.92 },
+  { n: "Mexique",          f: "🇲🇽", elo: 1810, att: 1.06, def: 0.92 },
+  { n: "Tchéquie",         f: "🇨🇿", elo: 1800, att: 1.02, def: 0.92 },
+  { n: "États-Unis",       f: "🇺🇸", elo: 1800, att: 1.06, def: 0.92 },
+  { n: "Corée du Sud",     f: "🇰🇷", elo: 1790, att: 1.02, def: 0.92 },
+  { n: "Suède",            f: "🇸🇪", elo: 1785, att: 1.06, def: 0.92 },
+  { n: "Côte d'Ivoire",    f: "🇨🇮", elo: 1775, att: 1.02, def: 0.94 },
+  { n: "Canada",           f: "🇨🇦", elo: 1770, att: 1.02, def: 0.96 },
+  { n: "Algérie",          f: "🇩🇿", elo: 1770, att: 1.06, def: 0.90 },
+  { n: "Iran",             f: "🇮🇷", elo: 1760, att: 0.94, def: 0.86 },
+  { n: "Égypte",           f: "🇪🇬", elo: 1760, att: 0.98, def: 0.92 },
+  { n: "Écosse",           f: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", elo: 1760, att: 0.98, def: 0.92 },
+  { n: "RD Congo",         f: "🇨🇩", elo: 1730, att: 1.02, def: 1.02 },
+  { n: "Ghana",            f: "🇬🇭", elo: 1730, att: 0.98, def: 1.02 },
+  { n: "Paraguay",         f: "🇵🇾", elo: 1740, att: 0.86, def: 0.94 },
+  { n: "Australie",        f: "🇦🇺", elo: 1720, att: 0.86, def: 1.02 },
+  { n: "Afrique du Sud",   f: "🇿🇦", elo: 1720, att: 0.90, def: 1.02 },
+  { n: "Bosnie-Herzégovine",f: "🇧🇦", elo: 1720, att: 0.94, def: 1.04 },
+  { n: "Tunisie",          f: "🇹🇳", elo: 1710, att: 0.86, def: 0.94 },
+  { n: "Ouzbékistan",      f: "🇺🇿", elo: 1680, att: 0.86, def: 1.02 },
+  { n: "Panama",           f: "🇵🇦", elo: 1670, att: 0.82, def: 1.04 },
+  { n: "Qatar",            f: "🇶🇦", elo: 1665, att: 0.82, def: 1.06 },
+  { n: "Arabie saoudite",  f: "🇸🇦", elo: 1660, att: 0.82, def: 1.04 },
+  { n: "Jordanie",         f: "🇯🇴", elo: 1660, att: 0.82, def: 0.98 },
+  { n: "Irak",             f: "🇮🇶", elo: 1650, att: 0.80, def: 1.04 },
+  { n: "Cap-Vert",         f: "🇨🇻", elo: 1640, att: 0.82, def: 1.04 },
+  { n: "Haïti",            f: "🇭🇹", elo: 1600, att: 0.76, def: 1.10 },
+  { n: "Curaçao",          f: "🇨🇼", elo: 1580, att: 0.70, def: 1.14 },
+  { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
 
 /* Tirage OFFICIEL de la Coupe du Monde 2026 (groupes A à L). */
@@ -230,8 +230,8 @@ function effectivePool(stats, eloArr) {
     const newElo = eloArr ? eloArr[i] : t.elo;
     if (!s.gp) return { ...t, elo: newElo };
     const w = Math.min(0.5, 0.15 * s.gp);
-    const attObs = Math.max(0.2, s.gf / s.gp) / BASE_GOALS;
-    const defObs = Math.max(0.2, s.ga / s.gp) / BASE_GOALS;
+    const attObs = Math.max(0.2, s.gf / s.gp) / WC_AVG;
+    const defObs = Math.max(0.2, s.ga / s.gp) / WC_AVG;
     return { ...t, elo: newElo, att: Math.pow(t.att, 1 - w) * Math.pow(attObs, w), def: Math.pow(t.def, 1 - w) * Math.pow(defObs, w) };
   });
 }
@@ -329,7 +329,7 @@ function MatchTab() {
   const [o1, setO1] = useState(""), [ox, setOx] = useState(""), [o2, setO2] = useState("");
   const [openHow, setOpenHow] = useState(false), [openApi, setOpenApi] = useState(false);
   const home = POOL[h], away = POOL[a], same = h === a;
-  const R = useMemo(() => (same ? null : predict(home, away, neutral)), [h, a, neutral]);
+  const R = useMemo(() => (same ? null : predict(home, away, neutral, WC_AVG, LEAGUE_RHO.WC)), [h, a, neutral]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
