@@ -92,6 +92,46 @@ const POOL = [
   { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
 
+/* Sélections NON qualifiées pour le Mondial 2026, disponibles dans l'onglet
+ * Match (mode International) uniquement — le POOL ci-dessus reste la référence
+ * des 48 qualifiés pour l'onglet Mondial 26. Mêmes conventions de ratings. */
+const EXTRA_NATIONS = [
+  { n: "Albanie",             f: "🇦🇱", elo: 1690, att: 0.82, def: 1.00 },
+  { n: "Bahreïn",             f: "🇧🇭", elo: 1620, att: 0.75, def: 1.08 },
+  { n: "Bolivie",             f: "🇧🇴", elo: 1640, att: 0.80, def: 1.15 },
+  { n: "Burkina Faso",        f: "🇧🇫", elo: 1720, att: 0.95, def: 1.00 },
+  { n: "Cameroun",            f: "🇨🇲", elo: 1780, att: 1.05, def: 0.95 },
+  { n: "Chili",               f: "🇨🇱", elo: 1760, att: 0.95, def: 1.00 },
+  { n: "Chine",               f: "🇨🇳", elo: 1600, att: 0.72, def: 1.12 },
+  { n: "Costa Rica",          f: "🇨🇷", elo: 1720, att: 0.85, def: 1.00 },
+  { n: "Danemark",            f: "🇩🇰", elo: 1865, att: 1.15, def: 0.85 },
+  { n: "Émirats arabes unis", f: "🇦🇪", elo: 1680, att: 0.85, def: 1.05 },
+  { n: "Finlande",            f: "🇫🇮", elo: 1650, att: 0.80, def: 1.08 },
+  { n: "Gabon",               f: "🇬🇦", elo: 1710, att: 0.95, def: 1.05 },
+  { n: "Géorgie",             f: "🇬🇪", elo: 1700, att: 0.95, def: 1.05 },
+  { n: "Grèce",               f: "🇬🇷", elo: 1790, att: 1.10, def: 0.95 },
+  { n: "Guinée",              f: "🇬🇳", elo: 1680, att: 0.85, def: 1.05 },
+  { n: "Honduras",            f: "🇭🇳", elo: 1670, att: 0.80, def: 1.05 },
+  { n: "Hongrie",             f: "🇭🇺", elo: 1760, att: 1.00, def: 1.00 },
+  { n: "Irlande",             f: "🇮🇪", elo: 1720, att: 0.90, def: 1.00 },
+  { n: "Italie",              f: "🇮🇹", elo: 1950, att: 1.30, def: 0.80 },
+  { n: "Jamaïque",            f: "🇯🇲", elo: 1690, att: 0.85, def: 1.05 },
+  { n: "Macédoine du Nord",   f: "🇲🇰", elo: 1680, att: 0.82, def: 1.05 },
+  { n: "Mali",                f: "🇲🇱", elo: 1760, att: 1.00, def: 0.92 },
+  { n: "Nigeria",             f: "🇳🇬", elo: 1800, att: 1.10, def: 0.92 },
+  { n: "Oman",                f: "🇴🇲", elo: 1640, att: 0.78, def: 1.05 },
+  { n: "Pays de Galles",      f: "🏴󠁧󠁢󠁷󠁬󠁳󠁿", elo: 1740, att: 0.95, def: 1.00 },
+  { n: "Pérou",               f: "🇵🇪", elo: 1740, att: 0.85, def: 0.98 },
+  { n: "Pologne",             f: "🇵🇱", elo: 1800, att: 1.05, def: 0.95 },
+  { n: "Roumanie",            f: "🇷🇴", elo: 1730, att: 0.95, def: 1.02 },
+  { n: "Serbie",              f: "🇷🇸", elo: 1780, att: 1.00, def: 0.98 },
+  { n: "Slovaquie",           f: "🇸🇰", elo: 1740, att: 0.90, def: 0.98 },
+  { n: "Slovénie",            f: "🇸🇮", elo: 1700, att: 0.85, def: 1.00 },
+  { n: "Ukraine",             f: "🇺🇦", elo: 1790, att: 1.05, def: 0.95 },
+  { n: "Venezuela",           f: "🇻🇪", elo: 1720, att: 0.90, def: 1.02 },
+  { n: "Zambie",              f: "🇿🇲", elo: 1650, att: 0.85, def: 1.10 },
+];
+
 /* ---------- Championnats nationaux (onglet Match, mode "National") ----------
  * Effectifs 2025-26 des 5 grands championnats. Ratings att/def ILLUSTRATIFS
  * (mêmes conventions que POOL : att/def relatifs à la moyenne de la ligue,
@@ -244,6 +284,14 @@ const FIFA_RANK = {
   "Afrique du Sud":50,"Ouzbékistan":55,"Arabie saoudite":56,"Qatar":58,
   "Jordanie":62,"Irak":66,"Cap-Vert":70,"Haïti":80,"Curaçao":88,
   "Nouvelle-Zélande":96,
+  /* Sélections non qualifiées (onglet Match, mode International). */
+  "Italie":12,"Danemark":22,"Ukraine":27,"Pays de Galles":30,"Pologne":36,
+  "Serbie":33,"Grèce":39,"Hongrie":42,"Nigeria":44,"Venezuela":46,
+  "Costa Rica":47,"Cameroun":50,"Pérou":52,"Mali":53,"Chili":57,
+  "Slovaquie":44,"Roumanie":48,"Slovénie":54,"Irlande":60,"Burkina Faso":61,
+  "Jamaïque":63,"Albanie":65,"Macédoine du Nord":66,"Géorgie":67,
+  "Émirats arabes unis":68,"Finlande":72,"Honduras":75,"Gabon":77,
+  "Bolivie":78,"Oman":79,"Guinée":80,"Bahreïn":81,"Zambie":88,"Chine":94,
 };
 
 /* Tirage OFFICIEL de la Coupe du Monde 2026 (groupes A à L). */
@@ -607,10 +655,11 @@ function MatchTab({ intlMatches = [] }) {
       .catch(() => { if (on) setLiveState("err"); });
     return () => { on = false; };
   }, [scope, clubLeague]);
-  // International : les 48 équipes du Mondial, ordre alphabétique. National : clubs du championnat
-  // choisi, dont les forces att/def sont fusionnées avec les stats live (poids selon matchs joués).
+  // International : les 48 qualifiés + sélections non qualifiées (EXTRA_NATIONS), ordre
+  // alphabétique. National : clubs du championnat choisi, dont les forces att/def sont
+  // fusionnées avec les stats live (poids selon matchs joués).
   const pool = useMemo(() => {
-    if (scope === "intl") return [...adjustPoolWithIntl(intlMatches)].sort((x, y) => x.n.localeCompare(y.n, "fr"));
+    if (scope === "intl") return adjustPoolWithIntl(intlMatches, [...POOL, ...EXTRA_NATIONS]).sort((x, y) => x.n.localeCompare(y.n, "fr"));
     const base = CLUB_POOL[clubLeague];
     const live = liveClub[clubLeague];
     if (!live) return base;
@@ -1194,6 +1243,17 @@ const NAT_EN = {
   "Bosnie-Herzégovine": "Bosnia", "Tunisie": "Tunisia", "Ouzbékistan": "Uzbekistan", "Panama": "Panama",
   "Qatar": "Qatar", "Arabie saoudite": "Saudi Arabia", "Jordanie": "Jordan", "Irak": "Iraq",
   "Cap-Vert": "Cape Verde", "Haïti": "Haiti", "Curaçao": "Curacao", "Nouvelle-Zélande": "New Zealand",
+  /* Sélections non qualifiées (onglet Match, mode International). */
+  "Italie": "Italy", "Danemark": "Denmark", "Ukraine": "Ukraine", "Pologne": "Poland",
+  "Serbie": "Serbia", "Grèce": "Greece", "Hongrie": "Hungary", "Pays de Galles": "Wales",
+  "Roumanie": "Romania", "Slovaquie": "Slovakia", "Slovénie": "Slovenia",
+  "Irlande": "Republic of Ireland", "Géorgie": "Georgia", "Albanie": "Albania",
+  "Macédoine du Nord": "North Macedonia", "Finlande": "Finland", "Nigeria": "Nigeria",
+  "Cameroun": "Cameroon", "Mali": "Mali", "Burkina Faso": "Burkina Faso", "Gabon": "Gabon",
+  "Guinée": "Guinea", "Zambie": "Zambia", "Chili": "Chile", "Pérou": "Peru",
+  "Venezuela": "Venezuela", "Costa Rica": "Costa Rica", "Jamaïque": "Jamaica",
+  "Honduras": "Honduras", "Bolivie": "Bolivia", "Émirats arabes unis": "United Arab Emirates",
+  "Oman": "Oman", "Bahreïn": "Bahrain", "Chine": "China PR",
 };
 const EN_TO_FR_NORM = (() => {
   const m = {};
@@ -1202,7 +1262,7 @@ const EN_TO_FR_NORM = (() => {
 })();
 
 // Ajuste att/def/elo du pool avec classement FIFA + résultats internationaux récents.
-function adjustPoolWithIntl(intlMatches) {
+function adjustPoolWithIntl(intlMatches, basePool = POOL) {
   const clamp = (x) => Math.max(0.6, Math.min(1.8, x));
   const formMap = {};
   for (const m of intlMatches) {
@@ -1211,7 +1271,7 @@ function adjustPoolWithIntl(intlMatches) {
     if (hFr) { if (!formMap[hFr]) formMap[hFr] = { gf: 0, ga: 0, gp: 0 }; formMap[hFr].gf += m.hg; formMap[hFr].ga += m.ag; formMap[hFr].gp++; }
     if (aFr) { if (!formMap[aFr]) formMap[aFr] = { gf: 0, ga: 0, gp: 0 }; formMap[aFr].gf += m.ag; formMap[aFr].ga += m.hg; formMap[aFr].gp++; }
   }
-  return POOL.map((t) => {
+  return basePool.map((t) => {
     const rank = FIFA_RANK[t.n] || 70;
     // Elo ajusté : 60% elo actuel + 40% elo dérivé du rang FIFA (rang 1→2100, rang 100→1400)
     const rankElo = Math.round(2100 - 7 * (rank - 1));
