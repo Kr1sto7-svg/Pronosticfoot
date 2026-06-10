@@ -20,20 +20,21 @@ const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL
 const LETTERS = "ABCDEFGHIJKL".split("");
 /* Calendrier OFFICIEL des matchs de groupes (FIFA), dans l'ordre chronologique réel.
  * x / y = position des équipes dans GROUPS_2026 (orientation domicile/extérieur officielle) ;
- * iso = coup d'envoi en UTC, affiché en heure française via formatFrDate. */
+ * iso = coup d'envoi en UTC, affiché en heure française via formatFrDate ;
+ * m6 = diffusé en clair sur M6 (les 104 matchs sont sur beIN Sports). */
 const WC_MATCHES = [
-  /* A */ [{ x: 0, y: 2, iso: "2026-06-11T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-12T02:00:00Z" }, { x: 3, y: 2, iso: "2026-06-18T16:00:00Z" }, { x: 0, y: 1, iso: "2026-06-19T01:00:00Z" }, { x: 3, y: 0, iso: "2026-06-25T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-25T01:00:00Z" }],
-  /* B */ [{ x: 0, y: 3, iso: "2026-06-12T19:00:00Z" }, { x: 2, y: 1, iso: "2026-06-13T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-18T19:00:00Z" }, { x: 0, y: 2, iso: "2026-06-18T22:00:00Z" }, { x: 1, y: 0, iso: "2026-06-24T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-24T19:00:00Z" }],
-  /* C */ [{ x: 0, y: 1, iso: "2026-06-13T22:00:00Z" }, { x: 3, y: 2, iso: "2026-06-14T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-19T22:00:00Z" }, { x: 0, y: 3, iso: "2026-06-20T00:30:00Z" }, { x: 2, y: 0, iso: "2026-06-24T22:00:00Z" }, { x: 1, y: 3, iso: "2026-06-24T22:00:00Z" }],
-  /* D */ [{ x: 0, y: 1, iso: "2026-06-13T01:00:00Z" }, { x: 2, y: 3, iso: "2026-06-14T04:00:00Z" }, { x: 0, y: 2, iso: "2026-06-19T19:00:00Z" }, { x: 3, y: 1, iso: "2026-06-20T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-26T02:00:00Z" }, { x: 1, y: 2, iso: "2026-06-26T02:00:00Z" }],
-  /* E */ [{ x: 0, y: 3, iso: "2026-06-14T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-14T23:00:00Z" }, { x: 0, y: 2, iso: "2026-06-20T20:00:00Z" }, { x: 1, y: 3, iso: "2026-06-21T00:00:00Z" }, { x: 3, y: 2, iso: "2026-06-25T20:00:00Z" }, { x: 1, y: 0, iso: "2026-06-25T20:00:00Z" }],
-  /* F */ [{ x: 0, y: 1, iso: "2026-06-14T20:00:00Z" }, { x: 3, y: 2, iso: "2026-06-15T02:00:00Z" }, { x: 0, y: 3, iso: "2026-06-20T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-21T04:00:00Z" }, { x: 1, y: 3, iso: "2026-06-25T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-25T23:00:00Z" }],
-  /* G */ [{ x: 0, y: 2, iso: "2026-06-15T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-16T01:00:00Z" }, { x: 0, y: 1, iso: "2026-06-21T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-22T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-27T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-27T03:00:00Z" }],
-  /* H */ [{ x: 0, y: 3, iso: "2026-06-15T16:00:00Z" }, { x: 2, y: 1, iso: "2026-06-15T22:00:00Z" }, { x: 0, y: 2, iso: "2026-06-21T16:00:00Z" }, { x: 1, y: 3, iso: "2026-06-21T22:00:00Z" }, { x: 3, y: 2, iso: "2026-06-27T00:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T00:00:00Z" }],
-  /* I */ [{ x: 0, y: 1, iso: "2026-06-16T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-16T22:00:00Z" }, { x: 0, y: 3, iso: "2026-06-22T21:00:00Z" }, { x: 2, y: 1, iso: "2026-06-23T00:00:00Z" }, { x: 2, y: 0, iso: "2026-06-26T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-26T19:00:00Z" }],
-  /* J */ [{ x: 0, y: 2, iso: "2026-06-17T01:00:00Z" }, { x: 1, y: 3, iso: "2026-06-17T04:00:00Z" }, { x: 0, y: 1, iso: "2026-06-22T17:00:00Z" }, { x: 3, y: 2, iso: "2026-06-23T03:00:00Z" }, { x: 2, y: 1, iso: "2026-06-28T02:00:00Z" }, { x: 3, y: 0, iso: "2026-06-28T02:00:00Z" }],
-  /* K */ [{ x: 0, y: 3, iso: "2026-06-17T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-18T02:00:00Z" }, { x: 0, y: 2, iso: "2026-06-23T17:00:00Z" }, { x: 1, y: 3, iso: "2026-06-24T02:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T23:30:00Z" }, { x: 3, y: 2, iso: "2026-06-27T23:30:00Z" }],
-  /* L */ [{ x: 0, y: 1, iso: "2026-06-17T20:00:00Z" }, { x: 3, y: 2, iso: "2026-06-17T23:00:00Z" }, { x: 0, y: 3, iso: "2026-06-23T20:00:00Z" }, { x: 2, y: 1, iso: "2026-06-23T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-27T21:00:00Z" }, { x: 1, y: 3, iso: "2026-06-27T21:00:00Z" }],
+  /* A */ [{ x: 0, y: 2, iso: "2026-06-11T19:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-12T02:00:00Z" }, { x: 3, y: 2, iso: "2026-06-18T16:00:00Z", m6: 1 }, { x: 0, y: 1, iso: "2026-06-19T01:00:00Z" }, { x: 3, y: 0, iso: "2026-06-25T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-25T01:00:00Z" }],
+  /* B */ [{ x: 0, y: 3, iso: "2026-06-12T19:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-13T19:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-18T19:00:00Z", m6: 1 }, { x: 0, y: 2, iso: "2026-06-18T22:00:00Z" }, { x: 1, y: 0, iso: "2026-06-24T19:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-24T19:00:00Z" }],
+  /* C */ [{ x: 0, y: 1, iso: "2026-06-13T22:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-14T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-19T22:00:00Z", m6: 1 }, { x: 0, y: 3, iso: "2026-06-20T00:30:00Z" }, { x: 2, y: 0, iso: "2026-06-24T22:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-24T22:00:00Z" }],
+  /* D */ [{ x: 0, y: 1, iso: "2026-06-13T01:00:00Z" }, { x: 2, y: 3, iso: "2026-06-14T04:00:00Z" }, { x: 0, y: 2, iso: "2026-06-19T19:00:00Z", m6: 1 }, { x: 3, y: 1, iso: "2026-06-20T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-26T02:00:00Z" }, { x: 1, y: 2, iso: "2026-06-26T02:00:00Z" }],
+  /* E */ [{ x: 0, y: 3, iso: "2026-06-14T17:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-14T23:00:00Z" }, { x: 0, y: 2, iso: "2026-06-20T20:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-21T00:00:00Z" }, { x: 3, y: 2, iso: "2026-06-25T20:00:00Z" }, { x: 1, y: 0, iso: "2026-06-25T20:00:00Z", m6: 1 }],
+  /* F */ [{ x: 0, y: 1, iso: "2026-06-14T20:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-15T02:00:00Z" }, { x: 0, y: 3, iso: "2026-06-20T17:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-21T04:00:00Z" }, { x: 1, y: 3, iso: "2026-06-25T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-25T23:00:00Z", m6: 1 }],
+  /* G */ [{ x: 0, y: 2, iso: "2026-06-15T19:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-16T01:00:00Z" }, { x: 0, y: 1, iso: "2026-06-21T19:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-22T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-27T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-27T03:00:00Z" }],
+  /* H */ [{ x: 0, y: 3, iso: "2026-06-15T16:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-15T22:00:00Z", m6: 1 }, { x: 0, y: 2, iso: "2026-06-21T16:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-21T22:00:00Z" }, { x: 3, y: 2, iso: "2026-06-27T00:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T00:00:00Z" }],
+  /* I */ [{ x: 0, y: 1, iso: "2026-06-16T19:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-16T22:00:00Z", m6: 1 }, { x: 0, y: 3, iso: "2026-06-22T21:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-23T00:00:00Z" }, { x: 2, y: 0, iso: "2026-06-26T19:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-26T19:00:00Z" }],
+  /* J */ [{ x: 0, y: 2, iso: "2026-06-17T01:00:00Z" }, { x: 1, y: 3, iso: "2026-06-17T04:00:00Z" }, { x: 0, y: 1, iso: "2026-06-22T17:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-23T03:00:00Z" }, { x: 2, y: 1, iso: "2026-06-28T02:00:00Z" }, { x: 3, y: 0, iso: "2026-06-28T02:00:00Z" }],
+  /* K */ [{ x: 0, y: 3, iso: "2026-06-17T17:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-18T02:00:00Z" }, { x: 0, y: 2, iso: "2026-06-23T17:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-24T02:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T23:30:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-27T23:30:00Z" }],
+  /* L */ [{ x: 0, y: 1, iso: "2026-06-17T20:00:00Z", m6: 1 }, { x: 3, y: 2, iso: "2026-06-17T23:00:00Z" }, { x: 0, y: 3, iso: "2026-06-23T20:00:00Z", m6: 1 }, { x: 2, y: 1, iso: "2026-06-23T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-27T21:00:00Z", m6: 1 }, { x: 1, y: 3, iso: "2026-06-27T21:00:00Z" }],
 ];
 const groupPairs = (gi) => WC_MATCHES[gi].map((m) => [m.x, m.y]);
 
@@ -90,8 +91,6 @@ const POOL = [
   { n: "Curaçao",          f: "🇨🇼", elo: 1580, att: 0.70, def: 1.14 },
   { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
-
-const FRANCE_PI = POOL.findIndex((t) => t.n === "France"); // diffusion TF1
 
 /* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
 const FIFA_RANK = {
@@ -498,17 +497,23 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveI
           <div key={s} className="wc-editrow"><span className="wc-flag">{POOL[group[s]].f}</span>
             <select value={group[s]} onChange={(e) => onTeam(gi, s, Number(e.target.value))}>{POOL.map((t, i) => <option key={i} value={i}>{t.n}</option>)}</select>
           </div>))}</div>
-        <div className="wc-matches">{WC_MATCHES[gi].map(({ x, y, iso }) => {
-          const id = "G" + LETTERS[gi] + "-" + x + "-" + y, r = results[id] || {};
+        <div className="wc-matches">{WC_MATCHES[gi]
+          // Date/heure : calendrier officiel intégré (heure française) ; l'API prime pour la date.
+          .map((m) => {
+            const id = "G" + LETTERS[gi] + "-" + m.x + "-" + m.y;
+            return { ...m, id, dateIso: (matchMeta && matchMeta[id] && matchMeta[id].dateIso) || m.iso };
+          })
+          // Tri chronologique garanti, même si une date API remplace la date statique.
+          .sort((a, b) => new Date(a.dateIso) - new Date(b.dateIso))
+          .map(({ x, y, id, dateIso, m6 }) => {
+          const r = results[id] || {};
           const ta = POOL[group[x]], tb = POOL[group[y]];
           const done = r.hg != null && r.ag != null;
           const isLive = liveIds ? liveIds.has(id) : false;
-          // Date/heure : calendrier officiel intégré (heure française), l'API prime si dispo.
-          const hasFrance = group[x] === FRANCE_PI || group[y] === FRANCE_PI;
-          const mm = (matchMeta && matchMeta[id]) || { dateIso: iso, channel: hasFrance ? "TF1 · beIN" : "beIN Sports" };
+          const mm = { dateIso, channel: m6 ? "M6 · beIN" : "beIN Sports" };
           const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
-            {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("TF1") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
+            {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
               <span className="wc-mscore">{isLive && <span className="wc-live-tag">live</span>}<ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} live={isLive} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} live={isLive} /></span>
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
@@ -572,10 +577,19 @@ function KnockoutTie({ tie, eff, onPick }) {
 function RoundBlock({ round, eff, onPick, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
+  /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
+   * M6 choisit ses affiches en clair après le tirage du tableau final. */
+  const infos = {
+    R32: "28 juin – 3 juil. · beIN Sports (9 matchs sur M6)",
+    R16: "4 – 7 juil. · beIN Sports (6 matchs sur M6)",
+    QF: "9 – 11 juil. · beIN Sports (3 matchs sur M6)",
+    SF: "14 – 15 juil. · M6 · beIN Sports",
+    F: "19 juil. · M6 · beIN Sports",
+  };
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} />)}</div>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} />)}</div></>}
     </div>
   );
 }
@@ -624,8 +638,7 @@ function WorldCupTab({ intlMatches = [] }) {
           else if (g[x] === aIdx && g[y] === hIdx) { id = "G" + LETTERS[gi] + "-" + x + "-" + y; hg = m.awayGoals; ag = m.homeGoals; }
           if (id) {
             if (hg != null && ag != null) mapped[id] = { hg, ag };
-            const hasFrance = hIdx === FRANCE_PI || aIdx === FRANCE_PI;
-            meta[id] = { dateIso: m.date, channel: hasFrance ? "TF1 · beIN" : "beIN Sports" };
+            meta[id] = { dateIso: m.date };
           }
         }
       }
@@ -1076,7 +1089,9 @@ function SquadsTab() {
       if (!tr.ok) { const j = await tr.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + tr.status)); }
       const d = await tr.json();
       if (!d.teams || !d.teams.length) throw new Error("Aucune équipe (compétition pas encore active ?)");
-      setTeams([...d.teams].sort((a, b) => a.name.localeCompare(b.name, "fr"))); setSel(0); setUpdated(new Date());
+      // Nom français quand connu (sélections nationales), puis tri alphabétique.
+      const named = d.teams.map((t) => ({ ...t, frName: EN_TO_FR_NORM[normName(t.name)] || t.name }));
+      setTeams(named.sort((a, b) => a.frName.localeCompare(b.frName, "fr"))); setSel(0); setUpdated(new Date());
       if (sr.ok) {
         const sd = await sr.json();
         const raw = sd.players || [];
@@ -1099,7 +1114,7 @@ function SquadsTab() {
       const frName = EN_TO_FR_NORM[normName(teamName)];
       const poolEntry = frName ? POOL.find((t) => t.n === frName) : null;
       return {
-        teamName, flag: poolEntry ? poolEntry.f : "🏳️",
+        teamName, display: frName || teamName, flag: poolEntry ? poolEntry.f : "🏳️",
         players: [...players].sort((a, b) => b.goals - a.goals || (b.assists || 0) - (a.assists || 0)).slice(0, 5),
         totalGoals: players.reduce((s, p) => s + p.goals, 0),
       };
@@ -1122,9 +1137,9 @@ function SquadsTab() {
       {teamScorers.length > 0 && (
         <section className="pf-card">
           <div className="pf-result-head">Meilleurs marqueurs par équipe · top 5</div>
-          {teamScorers.map(({ teamName, flag, players }) => (
+          {teamScorers.map(({ teamName, display, flag, players }) => (
             <div key={teamName} className="sq-team-block">
-              <div className="sq-team-hd">{flag} {teamName}</div>
+              <div className="sq-team-hd">{flag} {display}</div>
               <table className="wc-st sc-tbl">
                 <thead><tr><th>Joueur</th><th>B</th><th>PD</th><th>J</th></tr></thead>
                 <tbody>{players.map((p, i) => (
@@ -1140,7 +1155,7 @@ function SquadsTab() {
       {teams.length > 0 && (
         <section className="pf-card">
           <div className="pf-result-head">Effectif complet</div>
-          <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.name} ({t.squad.length})</option>)}</select>
+          <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.frName || t.name} ({t.squad.length})</option>)}</select>
           {team && team.squad.length > 0 && (<>
             <table className="wc-st sc-tbl">
               <thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th>{Object.keys(scorersMap).length > 0 && <><th>B</th><th>PD</th><th>J</th></>}</tr></thead>
@@ -1321,6 +1336,7 @@ const CSS = `
 .wc-pc-top{background:rgba(70,211,255,.12);}
 .wc-pc-top b{color:var(--cyan);}
 .wc-pc-top em{color:var(--lime);}
+.wc-kinfo{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);padding:0 15px 6px;}
 .wc-ties{padding:6px 13px 14px;display:flex;flex-direction:column;gap:8px;}
 .wc-tie{position:relative;display:flex;flex-direction:column;gap:6px;}
 .wc-tie-sides{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
