@@ -92,6 +92,145 @@ const POOL = [
   { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
 
+/* ---------- Championnats nationaux (onglet Match, mode "National") ----------
+ * Effectifs 2025-26 des 5 grands championnats. Ratings att/def ILLUSTRATIFS
+ * (mêmes conventions que POOL : att/def relatifs à la moyenne de la ligue,
+ * elo sur l'échelle clubelo). Le modèle de calcul est identique. */
+const CLUB_LEAGUES = [
+  { code: "FL1", n: "Ligue 1", f: "🇫🇷" },
+  { code: "PD",  n: "La Liga", f: "🇪🇸" },
+  { code: "PL",  n: "Premier League", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+  { code: "BL1", n: "Bundesliga", f: "🇩🇪" },
+  { code: "SA",  n: "Serie A (Calcio)", f: "🇮🇹" },
+];
+const CLUB_POOL = {
+  /* Ligue 1 calibrée sur la saison 2025-26 : PSG intouchable, Lens (meilleure
+   * défense) et Marseille (meilleure attaque) en dauphins, Strasbourg/Lyon/Lille
+   * en chasse ; Nice et Monaco en retrait ; Metz/Auxerre/Lorient à la peine. */
+  FL1: [
+    { n: "Angers",        f: "🇫🇷", elo: 1670, att: 0.72, def: 1.12 },
+    { n: "Auxerre",       f: "🇫🇷", elo: 1650, att: 0.70, def: 1.18 },
+    { n: "Brest",         f: "🇫🇷", elo: 1700, att: 0.92, def: 1.15 },
+    { n: "Le Havre",      f: "🇫🇷", elo: 1690, att: 0.80, def: 1.05 },
+    { n: "Lens",          f: "🇫🇷", elo: 1850, att: 1.20, def: 0.72 },
+    { n: "Lille",         f: "🇫🇷", elo: 1810, att: 1.20, def: 0.95 },
+    { n: "Lorient",       f: "🇫🇷", elo: 1660, att: 0.85, def: 1.25 },
+    { n: "Lyon",          f: "🇫🇷", elo: 1800, att: 1.05, def: 0.85 },
+    { n: "Marseille",     f: "🇫🇷", elo: 1870, att: 1.45, def: 0.90 },
+    { n: "Metz",          f: "🇫🇷", elo: 1620, att: 0.65, def: 1.30 },
+    { n: "Monaco",        f: "🇫🇷", elo: 1790, att: 1.15, def: 1.05 },
+    { n: "Nantes",        f: "🇫🇷", elo: 1670, att: 0.75, def: 1.10 },
+    { n: "Nice",          f: "🇫🇷", elo: 1730, att: 0.95, def: 1.10 },
+    { n: "Paris FC",      f: "🇫🇷", elo: 1710, att: 0.95, def: 1.15 },
+    { n: "Paris SG",      f: "🇫🇷", elo: 2050, att: 1.55, def: 0.70 },
+    { n: "Rennes",        f: "🇫🇷", elo: 1760, att: 1.05, def: 1.05 },
+    { n: "Strasbourg",    f: "🇫🇷", elo: 1800, att: 1.20, def: 1.00 },
+    { n: "Toulouse",      f: "🇫🇷", elo: 1730, att: 0.95, def: 1.00 },
+  ],
+  /* Liga calibrée sur la saison 2025-26 : duel Barça (attaque record, défense
+   * friable) / Real Madrid ; Villarreal excellent 3e, Atlético solide ; Betis et
+   * Espanyol bonnes surprises, Athletic en retrait ; Girona, Levante, Oviedo,
+   * Valence et Majorque dans le dur. */
+  PD: [
+    { n: "Alavés",          f: "🇪🇸", elo: 1700, att: 0.80, def: 0.95 },
+    { n: "Athletic Bilbao", f: "🇪🇸", elo: 1810, att: 0.95, def: 0.90 },
+    { n: "Atlético Madrid", f: "🇪🇸", elo: 1920, att: 1.25, def: 0.80 },
+    { n: "Barcelone",       f: "🇪🇸", elo: 2030, att: 1.65, def: 0.90 },
+    { n: "Betis Séville",   f: "🇪🇸", elo: 1840, att: 1.15, def: 0.92 },
+    { n: "Celta Vigo",      f: "🇪🇸", elo: 1760, att: 1.00, def: 1.00 },
+    { n: "Elche",           f: "🇪🇸", elo: 1730, att: 0.95, def: 0.98 },
+    { n: "Espanyol",        f: "🇪🇸", elo: 1770, att: 1.00, def: 0.98 },
+    { n: "Getafe",          f: "🇪🇸", elo: 1740, att: 0.85, def: 0.95 },
+    { n: "Girona",          f: "🇪🇸", elo: 1690, att: 0.80, def: 1.20 },
+    { n: "Levante",         f: "🇪🇸", elo: 1660, att: 0.85, def: 1.20 },
+    { n: "Majorque",        f: "🇪🇸", elo: 1690, att: 0.85, def: 1.10 },
+    { n: "Osasuna",         f: "🇪🇸", elo: 1710, att: 0.82, def: 1.02 },
+    { n: "Rayo Vallecano",  f: "🇪🇸", elo: 1750, att: 0.95, def: 1.00 },
+    { n: "Real Madrid",     f: "🇪🇸", elo: 2010, att: 1.50, def: 0.75 },
+    { n: "Real Oviedo",     f: "🇪🇸", elo: 1640, att: 0.65, def: 1.18 },
+    { n: "Real Sociedad",   f: "🇪🇸", elo: 1760, att: 0.95, def: 1.05 },
+    { n: "Séville FC",      f: "🇪🇸", elo: 1730, att: 0.95, def: 1.10 },
+    { n: "Valence",         f: "🇪🇸", elo: 1700, att: 0.80, def: 1.12 },
+    { n: "Villarreal",      f: "🇪🇸", elo: 1870, att: 1.30, def: 0.85 },
+  ],
+  /* Premier League calibrée sur la saison 2025-26 : Arsenal leader (meilleure
+   * défense), City dauphin ; Villa, Chelsea et Crystal Palace en embuscade ;
+   * Liverpool en crise (défense friable), Sunderland promu sensation ;
+   * Forest/West Ham dans le dur, Wolves catastrophiques. */
+  PL: [
+    { n: "Arsenal",           f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 2050, att: 1.45, def: 0.65 },
+    { n: "Aston Villa",       f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1880, att: 1.15, def: 0.85 },
+    { n: "Bournemouth",       f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1810, att: 1.10, def: 1.00 },
+    { n: "Brentford",         f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1780, att: 1.05, def: 1.05 },
+    { n: "Brighton",          f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1820, att: 1.10, def: 1.00 },
+    { n: "Burnley",           f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1680, att: 0.80, def: 1.20 },
+    { n: "Chelsea",           f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1920, att: 1.25, def: 0.88 },
+    { n: "Crystal Palace",    f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1860, att: 1.05, def: 0.82 },
+    { n: "Everton",           f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1770, att: 0.90, def: 0.95 },
+    { n: "Fulham",            f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1760, att: 0.95, def: 1.05 },
+    { n: "Leeds",             f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1700, att: 0.80, def: 1.15 },
+    { n: "Liverpool",         f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1900, att: 1.30, def: 1.00 },
+    { n: "Manchester City",   f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1990, att: 1.50, def: 0.85 },
+    { n: "Manchester United", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1850, att: 1.15, def: 1.00 },
+    { n: "Newcastle",         f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1810, att: 1.05, def: 0.95 },
+    { n: "Nottingham Forest", f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1720, att: 0.80, def: 1.10 },
+    { n: "Sunderland",        f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1830, att: 1.00, def: 0.85 },
+    { n: "Tottenham",         f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1800, att: 1.05, def: 0.95 },
+    { n: "West Ham",          f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1710, att: 0.85, def: 1.20 },
+    { n: "Wolverhampton",     f: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", elo: 1650, att: 0.70, def: 1.25 },
+  ],
+  /* Bundesliga calibrée sur la saison 2025-26 : Bayern écrasant (départ record,
+   * Kane), Leipzig dauphin surprise, Dortmund solide derrière ; Leverkusen en
+   * reconstruction ; Francfort spectaculaire mais friable ; Mayence, St. Pauli
+   * et Heidenheim dans la zone rouge. */
+  BL1: [
+    { n: "Augsbourg",            f: "🇩🇪", elo: 1700, att: 0.85, def: 1.15 },
+    { n: "Bayer Leverkusen",     f: "🇩🇪", elo: 1850, att: 1.15, def: 0.95 },
+    { n: "Bayern Munich",        f: "🇩🇪", elo: 2070, att: 1.70, def: 0.75 },
+    { n: "Borussia Dortmund",    f: "🇩🇪", elo: 1870, att: 1.15, def: 0.85 },
+    { n: "Borussia M'gladbach",  f: "🇩🇪", elo: 1720, att: 0.90, def: 1.10 },
+    { n: "Cologne",              f: "🇩🇪", elo: 1740, att: 0.95, def: 1.05 },
+    { n: "Eintracht Francfort",  f: "🇩🇪", elo: 1800, att: 1.20, def: 1.10 },
+    { n: "Fribourg",             f: "🇩🇪", elo: 1770, att: 0.95, def: 1.00 },
+    { n: "Hambourg",             f: "🇩🇪", elo: 1690, att: 0.75, def: 1.10 },
+    { n: "Heidenheim",           f: "🇩🇪", elo: 1640, att: 0.70, def: 1.20 },
+    { n: "Hoffenheim",           f: "🇩🇪", elo: 1800, att: 1.15, def: 1.00 },
+    { n: "Mayence",              f: "🇩🇪", elo: 1680, att: 0.80, def: 1.15 },
+    { n: "RB Leipzig",           f: "🇩🇪", elo: 1880, att: 1.20, def: 0.90 },
+    { n: "St. Pauli",            f: "🇩🇪", elo: 1690, att: 0.75, def: 1.15 },
+    { n: "Stuttgart",            f: "🇩🇪", elo: 1840, att: 1.10, def: 0.95 },
+    { n: "Union Berlin",         f: "🇩🇪", elo: 1720, att: 0.90, def: 1.10 },
+    { n: "Werder Brême",         f: "🇩🇪", elo: 1720, att: 0.90, def: 1.15 },
+    { n: "Wolfsburg",            f: "🇩🇪", elo: 1700, att: 0.85, def: 1.15 },
+  ],
+  /* Serie A calibrée sur la saison 2025-26 : sprint à quatre Inter (meilleure
+   * attaque) / Naples / Milan (Allegri, défense de fer) / Roma (meilleure
+   * défense) ; Côme et Bologne confirment, Juve et Lazio en demi-teinte ;
+   * Atalanta décroche, Fiorentina en perdition dans la zone rouge. */
+  SA: [
+    { n: "AC Milan",       f: "🇮🇹", elo: 1890, att: 1.10, def: 0.75 },
+    { n: "AS Rome",        f: "🇮🇹", elo: 1880, att: 1.00, def: 0.75 },
+    { n: "Atalanta",       f: "🇮🇹", elo: 1780, att: 1.00, def: 1.00 },
+    { n: "Bologne",        f: "🇮🇹", elo: 1840, att: 1.10, def: 0.90 },
+    { n: "Cagliari",       f: "🇮🇹", elo: 1690, att: 0.80, def: 1.10 },
+    { n: "Côme",           f: "🇮🇹", elo: 1830, att: 1.05, def: 0.85 },
+    { n: "Cremonese",      f: "🇮🇹", elo: 1720, att: 0.85, def: 1.05 },
+    { n: "Fiorentina",     f: "🇮🇹", elo: 1670, att: 0.80, def: 1.15 },
+    { n: "Genoa",          f: "🇮🇹", elo: 1690, att: 0.75, def: 1.08 },
+    { n: "Hellas Vérone",  f: "🇮🇹", elo: 1650, att: 0.70, def: 1.15 },
+    { n: "Inter Milan",    f: "🇮🇹", elo: 1960, att: 1.45, def: 0.85 },
+    { n: "Juventus",       f: "🇮🇹", elo: 1820, att: 1.00, def: 0.92 },
+    { n: "Lazio",          f: "🇮🇹", elo: 1780, att: 0.95, def: 0.90 },
+    { n: "Lecce",          f: "🇮🇹", elo: 1680, att: 0.72, def: 1.08 },
+    { n: "Naples",         f: "🇮🇹", elo: 1900, att: 1.10, def: 0.85 },
+    { n: "Parme",          f: "🇮🇹", elo: 1680, att: 0.72, def: 1.10 },
+    { n: "Pise",           f: "🇮🇹", elo: 1660, att: 0.70, def: 1.10 },
+    { n: "Sassuolo",       f: "🇮🇹", elo: 1730, att: 0.90, def: 1.05 },
+    { n: "Torino",         f: "🇮🇹", elo: 1710, att: 0.80, def: 1.10 },
+    { n: "Udinese",        f: "🇮🇹", elo: 1730, att: 0.85, def: 1.05 },
+  ],
+};
+
 /* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
 const FIFA_RANK = {
   "Argentine":1,"France":2,"Espagne":3,"Angleterre":4,"Brésil":5,
@@ -342,15 +481,15 @@ function FormPills({ form }) {
   if (!form || !form.length) return <span className="pf-elo">—</span>;
   return <div className="pf-form">{form.map((r, i) => <span key={i} className={"pf-pill pf-" + r}>{r === "W" ? "V" : r === "L" ? "D" : "N"}</span>)}</div>;
 }
-function TeamSelect({ label, value, onChange }) {
-  const t = POOL[value];
+function TeamSelect({ label, value, onChange, pool = POOL }) {
+  const t = pool[value];
   return (
     <div className="pf-team">
       <div className="pf-team-tag">{label}</div>
       <div className="pf-select-wrap">
         <span className="pf-flag">{t.f}</span>
         <select className="pf-select" value={value} onChange={(e) => onChange(Number(e.target.value))}>
-          {POOL.map((tm, i) => <option key={i} value={i}>{tm.n}</option>)}
+          {pool.map((tm, i) => <option key={i} value={i}>{tm.n}</option>)}
         </select>
         <ChevronDown size={18} className="pf-chev" />
       </div>
@@ -376,16 +515,126 @@ function EdgeRow({ label, model, fair, edge }) {
 }
 
 /* ========================= Onglet MATCH ========================= */
+/* Recalibrage live (mode National) : noms officiels football-data.org des clubs
+ * dont le nom court français ne suffit pas à la correspondance automatique. */
+const CLUB_API_ALIAS = {
+  "Angers": "Angers SCO", "Auxerre": "AJ Auxerre", "Brest": "Stade Brestois 29",
+  "Le Havre": "Le Havre AC", "Lens": "RC Lens", "Lille": "Lille OSC",
+  "Lorient": "FC Lorient", "Lyon": "Olympique Lyonnais", "Marseille": "Olympique de Marseille",
+  "Metz": "FC Metz", "Monaco": "AS Monaco FC", "Nantes": "FC Nantes", "Nice": "OGC Nice",
+  "Paris SG": "Paris Saint-Germain FC", "Rennes": "Stade Rennais FC 1901",
+  "Strasbourg": "RC Strasbourg Alsace", "Toulouse": "Toulouse FC",
+  "Alavés": "Deportivo Alavés", "Athletic Bilbao": "Athletic Club",
+  "Atlético Madrid": "Club Atlético de Madrid", "Barcelone": "FC Barcelona",
+  "Betis Séville": "Real Betis Balompié", "Celta Vigo": "RC Celta de Vigo",
+  "Espanyol": "RCD Espanyol de Barcelona", "Majorque": "RCD Mallorca",
+  "Osasuna": "CA Osasuna", "Rayo Vallecano": "Rayo Vallecano de Madrid",
+  "Real Madrid": "Real Madrid CF", "Real Sociedad": "Real Sociedad de Fútbol",
+  "Séville FC": "Sevilla FC", "Valence": "Valencia CF", "Villarreal": "Villarreal CF",
+  "Bournemouth": "AFC Bournemouth", "Brighton": "Brighton & Hove Albion FC",
+  "Leeds": "Leeds United FC", "Newcastle": "Newcastle United FC",
+  "Sunderland": "Sunderland AFC", "Tottenham": "Tottenham Hotspur FC",
+  "West Ham": "West Ham United FC", "Wolverhampton": "Wolverhampton Wanderers FC",
+  "Augsbourg": "FC Augsburg", "Bayer Leverkusen": "Bayer 04 Leverkusen",
+  "Bayern Munich": "FC Bayern München", "Borussia M'gladbach": "Borussia Mönchengladbach",
+  "Cologne": "1. FC Köln", "Eintracht Francfort": "Eintracht Frankfurt",
+  "Fribourg": "SC Freiburg", "Hambourg": "Hamburger SV", "Heidenheim": "1. FC Heidenheim 1846",
+  "Hoffenheim": "TSG 1899 Hoffenheim", "Mayence": "1. FSV Mainz 05",
+  "St. Pauli": "FC St. Pauli", "Stuttgart": "VfB Stuttgart",
+  "Union Berlin": "1. FC Union Berlin", "Werder Brême": "SV Werder Bremen", "Wolfsburg": "VfL Wolfsburg",
+  "AS Rome": "AS Roma", "Atalanta": "Atalanta BC", "Bologne": "Bologna FC 1909",
+  "Cagliari": "Cagliari Calcio", "Côme": "Como 1907", "Cremonese": "US Cremonese",
+  "Fiorentina": "ACF Fiorentina", "Genoa": "Genoa CFC", "Hellas Vérone": "Hellas Verona FC",
+  "Inter Milan": "FC Internazionale Milano", "Naples": "SSC Napoli",
+  "Parme": "Parma Calcio 1913", "Pise": "Pisa Sporting Club",
+  "Sassuolo": "US Sassuolo Calcio", "Udinese": "Udinese Calcio",
+};
+function matchClubTeam(club, apiTeams) {
+  const target = normName(CLUB_API_ALIAS[club.n] || club.n);
+  return apiTeams.find((t) => normName(t.name) === target)
+    || apiTeams.find((t) => { const n = normName(t.name); return n.includes(target) || target.includes(n); })
+    || null;
+}
+/* Forces réelles de la saison en cours : même pipeline que l'onglet Live
+ * (football-data.org pour les buts, xG Understat prioritaire quand dispo).
+ * Cache module : 1 requête par championnat et par session (le proxy cache 10 min). */
+const clubLiveCache = {};
+async function fetchClubLive(league) {
+  if (clubLiveCache[league]) return clubLiveCache[league];
+  const r = await fetch("/api/stats?source=footballdata&league=" + league);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const d = await r.json();
+  if (!d.teams || !d.teams.length) throw new Error("Aucune donnée");
+  let teams = d.teams, xgOn = false;
+  try {
+    const xr = await fetch("/api/stats?source=understat&league=" + league);
+    const xd = await xr.json();
+    if (xd.teams && xd.teams.length) {
+      const clampR = (x) => Math.max(0.6, Math.min(1.7, x));
+      const withXg = xd.teams.filter((t) => t.matches);
+      const xgAvg = withXg.length ? withXg.reduce((s, t) => s + t.xgFor, 0) / withXg.length : BASE_GOALS;
+      const byN = {}; xd.teams.forEach((t) => (byN[normName(t.name)] = t));
+      teams = teams.map((t) => {
+        const x = byN[normName(t.name)];
+        if (x && x.matches) { xgOn = true; return { ...t, att: clampR(x.xgFor / xgAvg), def: clampR(x.xgAgainst / xgAvg) }; }
+        return t;
+      });
+    }
+  } catch { /* repli silencieux sur les forces basées sur les buts */ }
+  const out = { teams, xgOn, leagueAvg: d.leagueAvg };
+  clubLiveCache[league] = out;
+  return out;
+}
 function MatchTab({ intlMatches = [] }) {
+  const [scope, setScope] = useState("intl"); // "intl" = sélections Mondial, "club" = championnats
+  const [clubLeague, setClubLeague] = useState("FL1");
   const [h, setH] = useState(0), [a, setA] = useState(1), [neutral, setNeutral] = useState(true);
   const [o1, setO1] = useState(""), [ox, setOx] = useState(""), [o2, setO2] = useState("");
   const [openHow, setOpenHow] = useState(false), [openApi, setOpenApi] = useState(false);
-  const adjPool = useMemo(() => adjustPoolWithIntl(intlMatches), [intlMatches]);
-  const home = adjPool[h], away = adjPool[a], same = h === a;
-  const h2h = useMemo(() => getH2HFromIntl(intlMatches, POOL[h].n, POOL[a].n), [h, a, intlMatches]);
+  const setScopeSafe = (s) => { setScope(s); setH(0); setA(1); setNeutral(s === "intl"); };
+  const setLeagueSafe = (l) => { setClubLeague(l); setH(0); setA(1); };
+  // Recalibrage live (mode National) : forces réelles de la saison en cours via le proxy.
+  const [liveClub, setLiveClub] = useState({});
+  const [liveState, setLiveState] = useState("");
+  useEffect(() => {
+    if (scope !== "club") return;
+    if (liveClub[clubLeague]) { setLiveState("ok"); return; }
+    let on = true;
+    const league = clubLeague;
+    setLiveState("loading");
+    fetchClubLive(league)
+      .then((d) => { if (!on) return; setLiveClub((p) => ({ ...p, [league]: d })); setLiveState("ok"); })
+      .catch(() => { if (on) setLiveState("err"); });
+    return () => { on = false; };
+  }, [scope, clubLeague]);
+  // International : les 48 équipes du Mondial, ordre alphabétique. National : clubs du championnat
+  // choisi, dont les forces att/def sont fusionnées avec les stats live (poids selon matchs joués).
+  const pool = useMemo(() => {
+    if (scope === "intl") return [...adjustPoolWithIntl(intlMatches)].sort((x, y) => x.n.localeCompare(y.n, "fr"));
+    const base = CLUB_POOL[clubLeague];
+    const live = liveClub[clubLeague];
+    if (!live) return base;
+    return base.map((c) => {
+      const t = matchClubTeam(c, live.teams);
+      if (!t || !t.matches) return c;
+      const w = Math.min(0.85, 0.12 * t.matches);
+      return {
+        ...c,
+        att: Math.pow(c.att, 1 - w) * Math.pow(t.att, w),
+        def: Math.pow(c.def, 1 - w) * Math.pow(t.def, w),
+        form: parseForm(t.form),
+        live: true,
+      };
+    });
+  }, [scope, clubLeague, intlMatches, liveClub]);
+  const liveInfo = scope === "club" ? liveClub[clubLeague] : null;
+  const leagueAvg = scope === "intl" ? WC_AVG : ((liveInfo && liveInfo.leagueAvg) || LEAGUE_GOALS_AVG[clubLeague] || BASE_GOALS);
+  const rho = scope === "intl" ? LEAGUE_RHO.WC : (LEAGUE_RHO[clubLeague] || RHO);
+  const home = pool[h], away = pool[a], same = h === a;
+  const h2h = useMemo(() => scope === "intl" ? getH2HFromIntl(intlMatches, home.n, away.n) : [], [scope, home.n, away.n, intlMatches]);
   const R = useMemo(() => {
     if (same) return null;
-    const p = predict(home, away, neutral, WC_AVG, LEAGUE_RHO.WC);
+    const p = predict(home, away, neutral, leagueAvg, rho);
     if (h2h.length < 2) return p;
     let hw = 0, dr = 0, aw = 0;
     h2h.forEach((m) => { if (m.hg > m.ag) hw++; else if (m.hg < m.ag) aw++; else dr++; });
@@ -394,15 +643,30 @@ function MatchTab({ intlMatches = [] }) {
     const pH = (p.pH * (1 - w) + (hw / n) * w), pD = (p.pD * (1 - w) + (dr / n) * w), pA = (p.pA * (1 - w) + (aw / n) * w);
     const s = pH + pD + pA || 1;
     return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
-  }, [h, a, neutral, adjPool, h2h]);
+  }, [same, home, away, neutral, leagueAvg, rho, h2h]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
     <>
       <section className="pf-card pf-match">
-        <TeamSelect label="DOMICILE" value={h} onChange={setH} />
+        <div className="sc-modes">
+          <button className={scope === "intl" ? "sc-mode on" : "sc-mode"} onClick={() => setScopeSafe("intl")}>🌍 International</button>
+          <button className={scope === "club" ? "sc-mode on" : "sc-mode"} onClick={() => setScopeSafe("club")}>🏆 National</button>
+        </div>
+        {scope === "club" && (<>
+          <select className="sc-team" value={clubLeague} onChange={(e) => setLeagueSafe(e.target.value)}>
+            {CLUB_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.f} {l.n}</option>)}
+          </select>
+          <div className="lv-meta">
+            {liveState === "loading" ? "Recalibrage sur la saison en cours…"
+              : liveState === "ok" ? "✓ " + pool.filter((t) => t.live).length + "/" + pool.length + " clubs recalibrés · saison en cours · " + (liveInfo && liveInfo.xgOn ? "xG réel (Understat)" : "buts réels") + " + forme récente"
+              : liveState === "err" ? "Live indisponible — ratings de référence 2025-26 (proxy /api/stats + FOOTBALLDATA_TOKEN requis)"
+              : ""}
+          </div>
+        </>)}
+        <TeamSelect label="DOMICILE" value={h} onChange={setH} pool={pool} />
         <button className="pf-swap" onClick={() => { setH(a); setA(h); }}><ArrowLeftRight size={18} /></button>
-        <TeamSelect label="EXTÉRIEUR" value={a} onChange={setA} />
+        <TeamSelect label="EXTÉRIEUR" value={a} onChange={setA} pool={pool} />
         <label className="pf-neutral"><input type="checkbox" checked={neutral} onChange={(e) => setNeutral(e.target.checked)} /><span>Terrain neutre (tournoi)</span></label>
       </section>
       {same && <div className="pf-warn">Choisis deux équipes différentes.</div>}
