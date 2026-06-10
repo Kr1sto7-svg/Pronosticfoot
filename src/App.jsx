@@ -13,6 +13,7 @@ import { ArrowLeftRight, ChevronDown, Info, Plug, ShieldAlert, TrendingUp, Troph
 
 const BASE_GOALS = 1.35, HOME_MULT = 1.18, AWAY_MULT = 0.92, RHO = -0.13, MAXG = 10;
 const FORM_DECAY = 0.75;
+const ELO_BETA = 0.25; // poids de l'écart Elo sur les xG : ±400 Elo ≈ ×1.28 / ÷1.28
 const WC_AVG = 1.18;
 const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
 const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
@@ -114,16 +115,18 @@ function formScore(form) {
   return w ? sum / w : 0;
 }
 function dcTau(i, j, lh, la, rho = RHO) {
-  if (i === 0 && j === 0) return 1 - lh * la * rho;
-  if (i === 0 && j === 1) return 1 + lh * rho;
-  if (i === 1 && j === 0) return 1 + la * rho;
-  if (i === 1 && j === 1) return 1 - rho;
-  return 1;
+  let t = 1;
+  if (i === 0 && j === 0) t = 1 - lh * la * rho;
+  else if (i === 0 && j === 1) t = 1 + lh * rho;
+  else if (i === 1 && j === 0) t = 1 + la * rho;
+  else if (i === 1 && j === 1) t = 1 - rho;
+  return Math.max(0, t); // une correction DC ne doit jamais produire une probabilité négative
 }
 function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
   const fh = formScore(home.form), fa = formScore(away.form);
+  const useSplit = !neutral && home.homeAtt != null && away.awayDef != null;
   let attH, defH, attA, defA;
-  if (!neutral && home.homeAtt != null && away.awayDef != null) {
+  if (useSplit) {
     attH = home.homeAtt * (1 + 0.08 * fh);
     defH = (home.homeDef ?? home.def) * (1 - 0.05 * fh);
     attA = (away.awayAtt ?? away.att) * (1 + 0.08 * fa);
@@ -135,38 +138,33 @@ function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
     defA = away.def * (1 - 0.05 * fa);
   }
   let lh = leagueAvg * attH * defA, la = leagueAvg * attA * defH;
-  if (!neutral && home.homeAtt == null) { lh *= HOME_MULT; la *= AWAY_MULT; }
-  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0, bHp = 0, bDp = 0, bAp = 0;
+  if (!neutral && !useSplit) { lh *= HOME_MULT; la *= AWAY_MULT; }
+  // Écart Elo : signal de force complémentaire aux ratings att/def.
+  if (home.elo != null && away.elo != null) {
+    const f = Math.exp(ELO_BETA * (home.elo - away.elo) / 400);
+    lh *= f; la /= f;
+  }
+  let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
+  let bestH = null, bestD = null, bestA = null;
   const scores = [];
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
     const p = poisson(i, lh) * poisson(j, la) * dcTau(i, j, lh, la, rho);
-    if (i > j) { pH += p; if (p > bHp) bHp = p; }
-    else if (i === j) { pD += p; if (p > bDp) bDp = p; }
-    else { pA += p; if (p > bAp) bAp = p; }
+    if (i > j) { pH += p; if (!bestH || p > bestH.p) bestH = { s: i + "–" + j, p }; }
+    else if (i === j) { pD += p; if (!bestD || p > bestD.p) bestD = { s: i + "–" + j, p }; }
+    else { pA += p; if (!bestA || p > bestA.p) bestA = { s: i + "–" + j, p }; }
     if (i + j >= 3) over25 += p; if (i >= 1 && j >= 1) btts += p;
     if (i <= 6 && j <= 6) scores.push({ s: i + "–" + j, p });
   }
   const total = pH + pD + pA || 1;
   pH /= total; pD /= total; pA /= total; over25 /= total; btts /= total;
-  bHp /= total; bDp /= total; bAp /= total;
   scores.forEach((s) => (s.p /= total));
   scores.sort((a, b) => b.p - a.p);
   const topScores = scores.slice(0, 6);
-  // Scores calculés depuis les buts espérés : round(favori) / floor(outsider)
-  const topHome = (() => {
-    const h = Math.max(1, Math.round(lh));
-    const a = Math.max(0, Math.min(Math.floor(la), h - 1));
-    return { s: h + "–" + a, p: bHp };
-  })();
-  const topDraw = (() => {
-    const d = Math.floor((lh + la) / 2);
-    return { s: d + "–" + d, p: bDp };
-  })();
-  const topAway = (() => {
-    const a = Math.max(1, Math.round(la));
-    const h = Math.max(0, Math.min(Math.floor(lh), a - 1));
-    return { s: h + "–" + a, p: bAp };
-  })();
+  // Score le plus probable conditionné à chaque issue — la probabilité affichée
+  // est celle de CE score (cohérence score/proba garantie).
+  const topHome = { s: bestH.s, p: bestH.p / total };
+  const topDraw = { s: bestD.s, p: bestD.p / total };
+  const topAway = { s: bestA.s, p: bestA.p / total };
   let score, scoreP;
   if (pH >= pD && pH >= pA) { score = topHome.s; scoreP = topHome.p; }
   else if (pA > pH && pA >= pD) { score = topAway.s; scoreP = topAway.p; }
@@ -182,6 +180,8 @@ function predictKnockout(home, away, leagueAvg = BASE_GOALS, rho = RHO) {
     const p = poisson(i, lhE) * poisson(j, laE);
     if (i > j) etA += p; else if (i < j) etB += p; else etD += p;
   }
+  const etTot = etA + etB + etD || 1;
+  etA /= etTot; etB /= etTot; etD /= etTot;
   const denom = base.pH + base.pA || 1;
   const penA = 0.5 * 0.6 + (base.pH / denom) * 0.4; // t.a.b. ~50/50, léger avantage au plus fort
   const regA = base.pH, regB = base.pA, drawMass = base.pD;
@@ -430,7 +430,7 @@ function MatchTab({ intlMatches = [] }) {
         </section>
       </>)}
       <Fold open={openHow} setOpen={setOpenHow} icon={<Info size={15} />} title="Comment ça marche">
-        <p>Chaque équipe a une force d'<b>attaque</b> et de <b>défense</b>, ajustée par la forme et l'avantage du terrain → deux nombres de buts attendus → une <b>loi de Poisson</b> donne chaque score → une <b>correction Dixon-Coles</b> rééquilibre les petits scores. La somme donne victoire / nul / défaite.</p>
+        <p>Chaque équipe a une force d'<b>attaque</b> et de <b>défense</b>, ajustée par la forme, l'<b>écart Elo</b> et l'avantage du terrain → deux nombres de buts attendus → une <b>loi de Poisson</b> donne chaque score → une <b>correction Dixon-Coles</b> rééquilibre les petits scores. La somme donne victoire / nul / défaite.</p>
         <p>La « value » compare le modèle à la probabilité implicite des cotes <i>sans la marge</i>. Avec des données d'exemple, ce n'est qu'indicatif.</p>
       </Fold>
       <Fold open={openApi} setOpen={setOpenApi} icon={<Plug size={15} />} title="Brancher une vraie API">
@@ -618,7 +618,10 @@ function WorldCupTab({ intlMatches = [] }) {
   const effectiveResults = useMemo(() => ({ ...apiMapped, ...results }), [apiMapped, results]);
   const liveIds = useMemo(() => new Set(Object.keys(apiMapped).filter((id) => !results[id])), [apiMapped, results]);
 
-  const adjPool = useMemo(() => adjustPoolWithIntl(intlMatches), [intlMatches]);
+  // Les matchs du Mondial en cours sont déjà intégrés via les scores de groupes
+  // (effectivePool + eloAfterGroups) : on les exclut ici pour ne pas compter
+  // deux fois les mêmes buts dans les ratings.
+  const adjPool = useMemo(() => adjustPoolWithIntl(intlMatches.filter((m) => m.comp !== "WC26")), [intlMatches]);
   const wc = useMemo(() => {
     const stats = tournamentStats(groups, effectiveResults);
     const eloArr = eloAfterGroups(groups, effectiveResults);
@@ -723,10 +726,14 @@ function LiveTab() {
         if (xd.teams && xd.teams.length) {
           const norm = normName;
           const clampR = (x) => Math.max(0.6, Math.min(1.7, x));
+          // Normaliser par la moyenne xG RÉELLE de la ligue (et non BASE_GOALS) :
+          // sinon les xG sont gonflés dans les ligues prolifiques et déflatés ailleurs.
+          const withXg = xd.teams.filter((t) => t.matches);
+          const xgAvg = withXg.length ? withXg.reduce((s, t) => s + t.xgFor, 0) / withXg.length : BASE_GOALS;
           const byN = {}; xd.teams.forEach((t) => (byN[norm(t.name)] = t));
           tm = tm.map((t) => {
             const x = byN[norm(t.name)];
-            if (x && x.matches) { xgActive = true; return { ...t, att: clampR(x.xgFor / BASE_GOALS), def: clampR(x.xgAgainst / BASE_GOALS), xgFor: x.xgFor, xgAgainst: x.xgAgainst }; }
+            if (x && x.matches) { xgActive = true; return { ...t, att: clampR(x.xgFor / xgAvg), def: clampR(x.xgAgainst / xgAvg), xgFor: x.xgFor, xgAgainst: x.xgAgainst }; }
             return t;
           });
         }
