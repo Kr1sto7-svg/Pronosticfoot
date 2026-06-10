@@ -18,7 +18,24 @@ const WC_AVG = 1.18;
 const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
 const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
 const LETTERS = "ABCDEFGHIJKL".split("");
-const GROUP_PAIRS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
+/* Calendrier OFFICIEL des matchs de groupes (FIFA), dans l'ordre chronologique réel.
+ * x / y = position des équipes dans GROUPS_2026 (orientation domicile/extérieur officielle) ;
+ * iso = coup d'envoi en UTC, affiché en heure française via formatFrDate. */
+const WC_MATCHES = [
+  /* A */ [{ x: 0, y: 2, iso: "2026-06-11T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-12T02:00:00Z" }, { x: 3, y: 2, iso: "2026-06-18T16:00:00Z" }, { x: 0, y: 1, iso: "2026-06-19T01:00:00Z" }, { x: 3, y: 0, iso: "2026-06-25T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-25T01:00:00Z" }],
+  /* B */ [{ x: 0, y: 3, iso: "2026-06-12T19:00:00Z" }, { x: 2, y: 1, iso: "2026-06-13T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-18T19:00:00Z" }, { x: 0, y: 2, iso: "2026-06-18T22:00:00Z" }, { x: 1, y: 0, iso: "2026-06-24T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-24T19:00:00Z" }],
+  /* C */ [{ x: 0, y: 1, iso: "2026-06-13T22:00:00Z" }, { x: 3, y: 2, iso: "2026-06-14T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-19T22:00:00Z" }, { x: 0, y: 3, iso: "2026-06-20T00:30:00Z" }, { x: 2, y: 0, iso: "2026-06-24T22:00:00Z" }, { x: 1, y: 3, iso: "2026-06-24T22:00:00Z" }],
+  /* D */ [{ x: 0, y: 1, iso: "2026-06-13T01:00:00Z" }, { x: 2, y: 3, iso: "2026-06-14T04:00:00Z" }, { x: 0, y: 2, iso: "2026-06-19T19:00:00Z" }, { x: 3, y: 1, iso: "2026-06-20T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-26T02:00:00Z" }, { x: 1, y: 2, iso: "2026-06-26T02:00:00Z" }],
+  /* E */ [{ x: 0, y: 3, iso: "2026-06-14T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-14T23:00:00Z" }, { x: 0, y: 2, iso: "2026-06-20T20:00:00Z" }, { x: 1, y: 3, iso: "2026-06-21T00:00:00Z" }, { x: 3, y: 2, iso: "2026-06-25T20:00:00Z" }, { x: 1, y: 0, iso: "2026-06-25T20:00:00Z" }],
+  /* F */ [{ x: 0, y: 1, iso: "2026-06-14T20:00:00Z" }, { x: 3, y: 2, iso: "2026-06-15T02:00:00Z" }, { x: 0, y: 3, iso: "2026-06-20T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-21T04:00:00Z" }, { x: 1, y: 3, iso: "2026-06-25T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-25T23:00:00Z" }],
+  /* G */ [{ x: 0, y: 2, iso: "2026-06-15T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-16T01:00:00Z" }, { x: 0, y: 1, iso: "2026-06-21T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-22T01:00:00Z" }, { x: 2, y: 1, iso: "2026-06-27T03:00:00Z" }, { x: 3, y: 0, iso: "2026-06-27T03:00:00Z" }],
+  /* H */ [{ x: 0, y: 3, iso: "2026-06-15T16:00:00Z" }, { x: 2, y: 1, iso: "2026-06-15T22:00:00Z" }, { x: 0, y: 2, iso: "2026-06-21T16:00:00Z" }, { x: 1, y: 3, iso: "2026-06-21T22:00:00Z" }, { x: 3, y: 2, iso: "2026-06-27T00:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T00:00:00Z" }],
+  /* I */ [{ x: 0, y: 1, iso: "2026-06-16T19:00:00Z" }, { x: 3, y: 2, iso: "2026-06-16T22:00:00Z" }, { x: 0, y: 3, iso: "2026-06-22T21:00:00Z" }, { x: 2, y: 1, iso: "2026-06-23T00:00:00Z" }, { x: 2, y: 0, iso: "2026-06-26T19:00:00Z" }, { x: 1, y: 3, iso: "2026-06-26T19:00:00Z" }],
+  /* J */ [{ x: 0, y: 2, iso: "2026-06-17T01:00:00Z" }, { x: 1, y: 3, iso: "2026-06-17T04:00:00Z" }, { x: 0, y: 1, iso: "2026-06-22T17:00:00Z" }, { x: 3, y: 2, iso: "2026-06-23T03:00:00Z" }, { x: 2, y: 1, iso: "2026-06-28T02:00:00Z" }, { x: 3, y: 0, iso: "2026-06-28T02:00:00Z" }],
+  /* K */ [{ x: 0, y: 3, iso: "2026-06-17T17:00:00Z" }, { x: 2, y: 1, iso: "2026-06-18T02:00:00Z" }, { x: 0, y: 2, iso: "2026-06-23T17:00:00Z" }, { x: 1, y: 3, iso: "2026-06-24T02:00:00Z" }, { x: 1, y: 0, iso: "2026-06-27T23:30:00Z" }, { x: 3, y: 2, iso: "2026-06-27T23:30:00Z" }],
+  /* L */ [{ x: 0, y: 1, iso: "2026-06-17T20:00:00Z" }, { x: 3, y: 2, iso: "2026-06-17T23:00:00Z" }, { x: 0, y: 3, iso: "2026-06-23T20:00:00Z" }, { x: 2, y: 1, iso: "2026-06-23T23:00:00Z" }, { x: 2, y: 0, iso: "2026-06-27T21:00:00Z" }, { x: 1, y: 3, iso: "2026-06-27T21:00:00Z" }],
+];
+const groupPairs = (gi) => WC_MATCHES[gi].map((m) => [m.x, m.y]);
 
 /* Les 48 équipes RÉELLEMENT qualifiées pour la Coupe du Monde 2026.
  * Ratings att/def illustratifs (par niveau) ; ils se recalibrent dès que tu
@@ -73,6 +90,8 @@ const POOL = [
   { n: "Curaçao",          f: "🇨🇼", elo: 1580, att: 0.70, def: 1.14 },
   { n: "Nouvelle-Zélande", f: "🇳🇿", elo: 1560, att: 0.70, def: 1.20 },
 ];
+
+const FRANCE_PI = POOL.findIndex((t) => t.n === "France"); // diffusion TF1
 
 /* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
 const FIFA_RANK = {
@@ -232,7 +251,7 @@ function defaultGroups() {
 }
 function tournamentStats(groups, results) {
   const st = POOL.map(() => ({ gf: 0, ga: 0, gp: 0 }));
-  groups.forEach((g, gi) => GROUP_PAIRS.forEach(([x, y]) => {
+  groups.forEach((g, gi) => groupPairs(gi).forEach(([x, y]) => {
     const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
     if (r && r.hg != null && r.ag != null) {
       const ti = g[x], tj = g[y];
@@ -246,7 +265,7 @@ function eloAfterGroups(groups, results) {
   const elo = POOL.map(t => t.elo);
   const K = 30;
   groups.forEach((g, gi) => {
-    GROUP_PAIRS.forEach(([x, y]) => {
+    groupPairs(gi).forEach(([x, y]) => {
       const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
       if (!r || r.hg == null || r.ag == null) return;
       const ti = g[x], tj = g[y];
@@ -271,7 +290,7 @@ function effectivePool(stats, eloArr, basePool = POOL) {
 }
 function groupTable(group, gi, results, eff) {
   const rows = group.map((ti) => ({ ti, pts: 0, gf: 0, ga: 0, gp: 0 }));
-  GROUP_PAIRS.forEach(([x, y]) => {
+  groupPairs(gi).forEach(([x, y]) => {
     const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
     if (r && r.hg != null && r.ag != null) {
       const X = rows[x], Y = rows[y];
@@ -460,7 +479,7 @@ function ScoreInput({ value, onChange, live }) {
 function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveIds, matchMeta }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
-  const played = GROUP_PAIRS.filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
+  const played = groupPairs(gi).filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
   return (
     <div className="pf-card wc-group">
       <button className="wc-group-head" onClick={() => setOpen(!open)}>
@@ -479,12 +498,14 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveI
           <div key={s} className="wc-editrow"><span className="wc-flag">{POOL[group[s]].f}</span>
             <select value={group[s]} onChange={(e) => onTeam(gi, s, Number(e.target.value))}>{POOL.map((t, i) => <option key={i} value={i}>{t.n}</option>)}</select>
           </div>))}</div>
-        <div className="wc-matches">{GROUP_PAIRS.map(([x, y]) => {
+        <div className="wc-matches">{WC_MATCHES[gi].map(({ x, y, iso }) => {
           const id = "G" + LETTERS[gi] + "-" + x + "-" + y, r = results[id] || {};
           const ta = POOL[group[x]], tb = POOL[group[y]];
           const done = r.hg != null && r.ag != null;
           const isLive = liveIds ? liveIds.has(id) : false;
-          const mm = matchMeta ? matchMeta[id] : null;
+          // Date/heure : calendrier officiel intégré (heure française), l'API prime si dispo.
+          const hasFrance = group[x] === FRANCE_PI || group[y] === FRANCE_PI;
+          const mm = (matchMeta && matchMeta[id]) || { dateIso: iso, channel: hasFrance ? "TF1 · beIN" : "beIN Sports" };
           const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("TF1") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
@@ -566,12 +587,12 @@ function WorldCupTab({ intlMatches = [] }) {
   const [loaded, setLoaded] = useState(false);
   const [rawApiMatches, setRawApiMatches] = useState([]);
   useEffect(() => { (async () => {
-    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v2"), k = await store.get("wc:ko:v2");
+    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3");
     if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); setLoaded(true);
   })(); }, []);
   useEffect(() => { if (loaded) store.set("wc:groups:v2", groups); }, [groups, loaded]);
-  useEffect(() => { if (loaded) store.set("wc:results:v2", results); }, [results, loaded]);
-  useEffect(() => { if (loaded) store.set("wc:ko:v2", ko); }, [ko, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:results:v3", results); }, [results, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:ko:v3", ko); }, [ko, loaded]);
   useEffect(() => {
     const fetchWcMatches = async () => {
       try {
@@ -588,7 +609,6 @@ function WorldCupTab({ intlMatches = [] }) {
 
   const apiParsed = useMemo(() => {
     const mapped = {}, meta = {};
-    const francePi = POOL.findIndex((t) => t.n === "France");
     for (const m of rawApiMatches) {
       const hFr = EN_TO_FR_NORM[normName(m.home)];
       const aFr = EN_TO_FR_NORM[normName(m.away)];
@@ -598,13 +618,13 @@ function WorldCupTab({ intlMatches = [] }) {
       if (hIdx < 0 || aIdx < 0) continue;
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi];
-        for (const [x, y] of GROUP_PAIRS) {
+        for (const [x, y] of groupPairs(gi)) {
           let id = null, hg = null, ag = null;
           if (g[x] === hIdx && g[y] === aIdx) { id = "G" + LETTERS[gi] + "-" + x + "-" + y; hg = m.homeGoals; ag = m.awayGoals; }
           else if (g[x] === aIdx && g[y] === hIdx) { id = "G" + LETTERS[gi] + "-" + x + "-" + y; hg = m.awayGoals; ag = m.homeGoals; }
           if (id) {
             if (hg != null && ag != null) mapped[id] = { hg, ag };
-            const hasFrance = hIdx === francePi || aIdx === francePi;
+            const hasFrance = hIdx === FRANCE_PI || aIdx === FRANCE_PI;
             meta[id] = { dateIso: m.date, channel: hasFrance ? "TF1 · beIN" : "beIN Sports" };
           }
         }
@@ -1056,7 +1076,7 @@ function SquadsTab() {
       if (!tr.ok) { const j = await tr.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + tr.status)); }
       const d = await tr.json();
       if (!d.teams || !d.teams.length) throw new Error("Aucune équipe (compétition pas encore active ?)");
-      setTeams(d.teams); setSel(0); setUpdated(new Date());
+      setTeams([...d.teams].sort((a, b) => a.name.localeCompare(b.name, "fr"))); setSel(0); setUpdated(new Date());
       if (sr.ok) {
         const sd = await sr.json();
         const raw = sd.players || [];
