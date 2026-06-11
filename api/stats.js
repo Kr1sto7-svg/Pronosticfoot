@@ -74,9 +74,166 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---- ABSENCES (blessures + suspensions/cartons rouges) via API-Football ----
+   * Endpoint injuries : type "Missing Fixture" (absent) ou "Questionable" (incertain),
+   * reason "Suspended" / "Red Card" / blessure. Les postes (G/D/M/A) sont joints
+   * depuis les effectifs football-data.org pour pondérer l'impact att/def. */
+  if (source === "absences") {
+    const key = process.env.APIFOOTBALL_KEY;
+    if (!key) return res.status(200).json({ source, supported: false, teams: [], note: "APIFOOTBALL_KEY non configurée — blessures/suspensions indisponibles." });
+    const LG = { WC: 1 }; // ids de compétitions API-Football
+    const lgId = LG[league || "WC"] || 1;
+    const season = req.query.season || "2026";
+    try {
+      const r = await fetch("https://v3.football.api-sports.io/injuries?league=" + lgId + "&season=" + season, { headers: { "x-apisports-key": key } });
+      const j = await r.json();
+      const rows = j.response || [];
+      // Une entrée par joueur (la plus récente), fixtures récentes ou à venir uniquement.
+      const cutoff = Date.now() - 4 * 24 * 3600 * 1000;
+      const byPlayer = {};
+      for (const it of rows) {
+        const d = new Date((it.fixture && it.fixture.date) || 0).getTime();
+        if (!d || d < cutoff) continue;
+        const pid = it.player && (it.player.id || it.player.name);
+        if (!pid || !it.team) continue;
+        const prev = byPlayer[pid];
+        if (!prev || d > prev._d) byPlayer[pid] = { _d: d, team: it.team.name, name: it.player.name, type: it.player.type || "", reason: it.player.reason || "" };
+      }
+      // Postes depuis les effectifs football-data.org (gratuit pour la WC).
+      const normP = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+      const posCode = (p) => {
+        const s = (p || "").toLowerCase();
+        if (s.includes("keeper")) return "G";
+        if (s.includes("midfield")) return "M";
+        if (s.includes("back") || s.includes("defen")) return "D";
+        if (s.includes("wing") || s.includes("forward") || s.includes("striker") || s.includes("offence") || s.includes("attack")) return "A";
+        return "";
+      };
+      const posIdx = {}; // nom de famille -> [{first, pos}]
+      if (token) {
+        try {
+          const tr = await fetch("https://api.football-data.org/v4/competitions/WC/teams", { headers: H });
+          if (tr.ok) {
+            const tj = await tr.json();
+            (tj.teams || []).forEach((t) => (t.squad || []).forEach((p) => {
+              const toks = normP(p.name).split(" ").filter(Boolean);
+              if (!toks.length) return;
+              const last = toks[toks.length - 1];
+              (posIdx[last] = posIdx[last] || []).push({ first: toks[0][0], pos: posCode(p.position) });
+            }));
+          }
+        } catch {}
+      }
+      const findPos = (name) => {
+        const toks = normP(name).split(" ").filter(Boolean);
+        if (!toks.length) return "";
+        const cands = posIdx[toks[toks.length - 1]] || [];
+        if (cands.length === 1) return cands[0].pos;
+        const hit = cands.find((c) => c.first === toks[0][0]);
+        return hit ? hit.pos : "";
+      };
+      const kindOf = (type, reason) => {
+        if (/question/i.test(type)) return "doubt";
+        if (/susp|red|yellow|card/i.test(reason)) return "sus";
+        return "inj";
+      };
+      const teamsMap = {};
+      Object.values(byPlayer).forEach((p) => {
+        (teamsMap[p.team] = teamsMap[p.team] || []).push({ name: p.name, reason: p.reason, kind: kindOf(p.type, p.reason), position: findPos(p.name) });
+      });
+      const teams = Object.entries(teamsMap).map(([team, players]) => ({ team, players }));
+      return res.status(200).json({ source, supported: true, league: league || "WC", season, updated: new Date().toISOString(), count: teams.length, teams });
+    } catch (e) {
+      return res.status(200).json({ source, supported: false, teams: [], note: "API-Football injoignable : " + String(e.message || e) });
+    }
+  }
+
   if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {
+    /* ---- BUTEURS POTENTIELS D'UN MATCH (?home=NomAnglais&away=NomAnglais) ----
+     * Croise : effectifs WC + postes (football-data, gratuit), buteurs réels du
+     * tournoi (football-data, gratuit) et stats en sélection (API-Football si clé).
+     * Le frontend répartit les buts attendus du match entre les joueurs. */
+    if (source === "goalscorers") {
+      const qh = req.query.home, qa = req.query.away;
+      if (!qh || !qa) return res.status(400).json({ error: "paramètres 'home' et 'away' requis" });
+      // Les stats joueurs évoluent lentement : cache long pour préserver les quotas.
+      res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=14400");
+      const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+      const posCode = (p) => {
+        const s = (p || "").toLowerCase();
+        if (s.includes("keeper")) return "G";
+        if (s.includes("midfield")) return "M";
+        if (s.includes("back") || s.includes("defen")) return "D";
+        if (s.includes("wing") || s.includes("forward") || s.includes("striker") || s.includes("offence") || s.includes("attack")) return "A";
+        return "";
+      };
+      const [sr, tr] = await Promise.all([
+        fetch("https://api.football-data.org/v4/competitions/WC/scorers?limit=100", { headers: H }),
+        fetch("https://api.football-data.org/v4/competitions/WC/teams", { headers: H }),
+      ]);
+      const sj = sr.ok ? await sr.json() : {};
+      const tj = tr.ok ? await tr.json() : {};
+      const wcGoals = {}; // nom normalisé -> buts marqués dans le tournoi
+      (sj.scorers || []).forEach((s) => { if (s.player && s.player.name) wcGoals[norm(s.player.name)] = s.goals || 0; });
+      const findTeam = (q) => {
+        const nq = norm(q);
+        return (tj.teams || []).find((t) => norm(t.name) === nq || norm(t.shortName || "") === nq)
+          || (tj.teams || []).find((t) => norm(t.name).includes(nq) || nq.includes(norm(t.name)));
+      };
+      const key = process.env.APIFOOTBALL_KEY;
+      // Stats en sélection (buts/matchs) via API-Football, saison la plus récente dispo.
+      const natStats = async (q) => {
+        if (!key) return {};
+        try {
+          const AH = { "x-apisports-key": key };
+          const trr = await fetch("https://v3.football.api-sports.io/teams?search=" + encodeURIComponent(q), { headers: AH });
+          const tjj = await trr.json();
+          const nat = (tjj.response || []).find((x) => x.team && x.team.national) || (tjj.response || [])[0];
+          if (!nat) return {};
+          for (const season of ["2026", "2025"]) {
+            const pr = await fetch("https://v3.football.api-sports.io/players?team=" + nat.team.id + "&season=" + season, { headers: AH });
+            const pj = await pr.json();
+            const out = {};
+            (pj.response || []).forEach((p) => {
+              const st = (p.statistics || [])[0] || {};
+              if (p.player && p.player.name) out[norm(p.player.name)] = { goals: (st.goals && st.goals.total) || 0, apps: (st.games && st.games.appearences) || 0 };
+            });
+            if (Object.keys(out).length) return out;
+          }
+        } catch {}
+        return {};
+      };
+      const build = async (q) => {
+        const t = findTeam(q);
+        const stats = await natStats(q);
+        // Index par nom de famille : tolère "K. Mbappé" (API-Football) vs "Kylian Mbappé".
+        const statIdx = {};
+        Object.entries(stats).forEach(([n, v]) => {
+          const tk = n.split(" ").filter(Boolean);
+          if (!tk.length) return;
+          (statIdx[tk[tk.length - 1]] = statIdx[tk[tk.length - 1]] || []).push({ first: tk[0][0], ...v });
+        });
+        const players = ((t && t.squad) || []).map((p) => {
+          const n = norm(p.name), tk = n.split(" ").filter(Boolean);
+          const last = tk.length ? tk[tk.length - 1] : "";
+          const cands = statIdx[last] || [];
+          const st = cands.length === 1 ? cands[0] : cands.find((c) => tk.length && c.first === tk[0][0]);
+          let wg = wcGoals[n];
+          if (wg == null) { // repli : nom de famille + initiale
+            const hit = Object.keys(wcGoals).find((k) => { const kt = k.split(" "); return kt[kt.length - 1] === last && k[0] === n[0]; });
+            wg = hit != null ? wcGoals[hit] : 0;
+          }
+          return { name: p.name, position: posCode(p.position), wcGoals: wg, seasonGoals: st ? st.goals : null, apps: st ? st.apps : null };
+        });
+        return { team: t ? (t.shortName || t.name) : q, players };
+      };
+      const homeRes = await build(qh);
+      const awayRes = await build(qa);
+      return res.status(200).json({ source, updated: new Date().toISOString(), home: homeRes, away: awayRes });
+    }
+
     /* ---- BUTEURS / PASSEURS ---- */
     if (source === "scorers") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });

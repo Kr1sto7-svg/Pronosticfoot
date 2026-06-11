@@ -474,6 +474,27 @@ function effectivePool(stats, eloArr, basePool = POOL) {
     return { ...t, elo: newElo, att: Math.pow(t.att, 1 - w) * Math.pow(attObs, w), def: Math.pow(t.def, 1 - w) * Math.pow(defObs, w) };
   });
 }
+/* Malus de force par joueur absent (suspension/carton rouge ou blessure),
+ * pondéré par poste : un attaquant absent pèse sur l'attaque, un défenseur ou
+ * gardien sur la défense (def = buts encaissés : plus haut = pire). Les joueurs
+ * "incertains" (doubt) sont affichés mais ne comptent pas. Impact cumulé borné. */
+function applyAbsences(pool, absences) {
+  if (!absences) return pool;
+  return pool.map((t, ti) => {
+    const list = (absences[ti] || []).filter((p) => p.kind !== "doubt");
+    if (!list.length) return t;
+    let am = 1, dm = 1;
+    for (const p of list) {
+      if (p.position === "G") dm *= 1.04;
+      else if (p.position === "D") dm *= 1.05;
+      else if (p.position === "M") { am *= 0.97; dm *= 1.025; }
+      else if (p.position === "A") am *= 0.94;
+      else { am *= 0.975; dm *= 1.025; } // poste inconnu : impact modéré réparti
+    }
+    am = Math.max(0.85, am); dm = Math.min(1.15, dm);
+    return { ...t, att: t.att * am, def: t.def * dm };
+  });
+}
 function groupTable(group, gi, results, eff) {
   const rows = group.map((ti) => ({ ti, pts: 0, gf: 0, ga: 0, gp: 0 }));
   groupPairs(gi).forEach(([x, y]) => {
@@ -837,10 +858,84 @@ function MatchScoreBox({ id, r, isLive, onValidate, onClear }) {
     </span>
   );
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta }) {
+/* Buteurs potentiels d'un match : les buts attendus (lh/la) du modèle sont
+ * répartis entre les joueurs selon un poids (poste, buts déjà marqués dans le
+ * tournoi, stats en sélection). P(marque) = 1 − exp(−λ·part). Les absents
+ * (blessés/suspendus) sont exclus. Données chargées à la demande (quota-safe). */
+const SCORER_POS_W = { A: 0.3, M: 0.12, D: 0.05, G: 0.01, "": 0.1 };
+const lastNameNorm = (s) => {
+  const t = (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").trim().split(/\s+/);
+  return t[t.length - 1] || "";
+};
+function scorerProbs(players, lambda, absents) {
+  const absSet = new Set((absents || []).filter((p) => p.kind !== "doubt").map((p) => lastNameNorm(p.name)));
+  const list = (players || []).filter((p) => p.position !== "G" && !absSet.has(lastNameNorm(p.name)));
+  const ws = list.map((p) => {
+    let w = SCORER_POS_W[p.position || ""] ?? 0.1;
+    if (p.wcGoals) w *= 1 + 1.2 * p.wcGoals;
+    if (p.seasonGoals != null && p.apps) w *= 1 + Math.min(2, (p.seasonGoals / Math.max(1, p.apps)) * 2.5);
+    return w;
+  });
+  const tot = ws.reduce((s, x) => s + x, 0) || 1;
+  return list
+    .map((p, i) => ({ ...p, prob: 1 - Math.exp(-lambda * 0.92 * (ws[i] / tot)) }))
+    .sort((a, b) => b.prob - a.prob)
+    .slice(0, 4);
+}
+const scorersFetchCache = {};
+function MatchScorers({ ta, tb, lh, la, absA, absB }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [state, setState] = useState("idle");
+  const load = async () => {
+    setOpen(!open);
+    if (data || state === "loading") return;
+    const qh = NAT_EN[ta.n] || ta.n, qa = NAT_EN[tb.n] || tb.n;
+    const ck = qh + "|" + qa;
+    if (scorersFetchCache[ck]) { setData(scorersFetchCache[ck]); return; }
+    setState("loading");
+    try {
+      const r = await fetch("/api/stats?source=goalscorers&home=" + encodeURIComponent(qh) + "&away=" + encodeURIComponent(qa));
+      const d = await r.json();
+      if (!r.ok || !d.home || !(d.home.players || []).length) { setState("err"); return; }
+      scorersFetchCache[ck] = d;
+      setData(d);
+      setState("idle");
+    } catch { setState("err"); }
+  };
+  const cols = data ? [
+    { t: ta, list: scorerProbs(data.home.players, lh, absA) },
+    { t: tb, list: scorerProbs(data.away.players, la, absB) },
+  ] : null;
+  return (
+    <div className="wc-sc-wrap">
+      <button className="wc-scbtn" onClick={load}>⚽ Buteurs probables <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
+      {open && state === "loading" && <div className="wc-sc-meta">Chargement…</div>}
+      {open && state === "err" && <div className="wc-sc-meta">Données buteurs indisponibles pour ce match.</div>}
+      {open && cols && (
+        <div className="wc-sc">
+          {cols.map((c, ci) => (
+            <div key={ci} className="wc-sc-col">
+              <div className="wc-sc-team">{c.t.f} {short(c.t.n)}</div>
+              {c.list.map((p, i) => (
+                <div key={i} className="wc-sc-p">
+                  <span className="wc-sc-n">{p.name}{p.wcGoals ? <em> · {p.wcGoals} but{p.wcGoals > 1 ? "s" : ""} CdM</em> : null}</span>
+                  <b>{pct(p.prob)}%</b>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {open && cols && <div className="wc-sc-meta">Estimation : buts attendus du match répartis selon le poste, les buts en CdM et les stats en sélection. Absents exclus.</div>}
+    </div>
+  );
+}
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const played = groupPairs(gi).filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
+  const absRows = absences ? group.map((ti) => ({ ti, list: absences[ti] || [] })).filter((r) => r.list.length) : [];
   return (
     <div className="pf-card wc-group">
       <button className="wc-group-head" onClick={() => setOpen(!open)}>
@@ -859,6 +954,19 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
           <div key={s} className="wc-editrow"><span className="wc-flag">{POOL[group[s]].f}</span>
             <select value={group[s]} onChange={(e) => onTeam(gi, s, Number(e.target.value))}>{POOL.map((t, i) => <option key={i} value={i}>{t.n}</option>)}</select>
           </div>))}</div>
+        {absRows.length > 0 && <div className="wc-abs">
+          <div className="wc-abs-h"><ShieldAlert size={12} /> Absents &amp; incertains — pris en compte dans les pronostics</div>
+          {absRows.map((r) => (
+            <div key={r.ti} className="wc-abs-row">
+              <span className="wc-flag">{POOL[r.ti].f}</span>
+              <span className="wc-abs-list">{r.list.map((p, i) => (
+                <span key={i} className={"wc-abs-p wc-abs-" + p.kind} title={p.reason || ""}>
+                  {p.kind === "sus" ? "🟥" : p.kind === "doubt" ? "❔" : "✚"} {p.name}
+                </span>
+              ))}</span>
+            </div>
+          ))}
+        </div>}
         <div className="wc-matches">{WC_MATCHES[gi]
           // Date/heure : calendrier officiel intégré (heure française) ; l'API prime pour la date.
           .map((m) => {
@@ -890,6 +998,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
                 <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
               </span>
             </div>}
+            {p && <MatchScorers ta={ta} tb={tb} lh={p.lh} la={p.la} absA={absences ? absences[group[x]] : null} absB={absences ? absences[group[y]] : null} />}
           </div>);
         })}</div>
       </div>)}
@@ -982,6 +1091,32 @@ function WorldCupTab({ intlMatches = [] }) {
     const iv = setInterval(fetchWcMatches, 10 * 60 * 1000);
     return () => clearInterval(iv);
   }, []);
+  // Blessures + suspensions (cartons rouges) via le proxy : impactent les forces.
+  const [absTeams, setAbsTeams] = useState([]);
+  useEffect(() => {
+    const fetchAbs = async () => {
+      try {
+        const r = await fetch("/api/stats?source=absences&league=WC");
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.supported) setAbsTeams(d.teams || []);
+      } catch {}
+    };
+    fetchAbs();
+    const iv = setInterval(fetchAbs, 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, []);
+  // Noms d'équipes API (anglais) -> index POOL via la table de correspondance.
+  const absences = useMemo(() => {
+    const m = {};
+    for (const t of absTeams) {
+      const fr = EN_TO_FR_NORM[normName(t.team)];
+      if (!fr) continue;
+      const ti = POOL.findIndex((p) => p.n === fr);
+      if (ti >= 0) m[ti] = t.players;
+    }
+    return m;
+  }, [absTeams]);
 
   const apiParsed = useMemo(() => {
     const mapped = {}, meta = {};
@@ -1020,7 +1155,7 @@ function WorldCupTab({ intlMatches = [] }) {
   const wc = useMemo(() => {
     const stats = tournamentStats(groups, effectiveResults);
     const eloArr = eloAfterGroups(groups, effectiveResults);
-    const eff = effectivePool(stats, eloArr, adjPool);
+    const eff = applyAbsences(effectivePool(stats, eloArr, adjPool), absences);
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
@@ -1033,7 +1168,7 @@ function WorldCupTab({ intlMatches = [] }) {
     const rounds = buildKnockout(eff, rank, ko, effectiveResults, WC_AVG, LEAGUE_RHO.WC);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, effectiveResults, ko, adjPool]);
+  }, [groups, effectiveResults, ko, adjPool, absences]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   // Validation explicite : le score n'est sauvegardé et pris en compte dans les
@@ -1056,7 +1191,7 @@ function WorldCupTab({ intlMatches = [] }) {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} />)}
       </>) : (<>
         <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
         {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} />)}
@@ -1680,6 +1815,13 @@ const CSS = `
 .wc-editrow{display:flex;align-items:center;gap:5px;background:#0e1116;border:1px solid var(--line);border-radius:9px;padding:4px 7px;}
 .wc-editrow select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:var(--txt);font-size:12px;width:100%;outline:none;}
 .wc-editrow select option{background:#15181d;}
+.wc-abs{background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;display:flex;flex-direction:column;gap:5px;}
+.wc-abs-h{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;}
+.wc-abs-row{display:flex;align-items:flex-start;gap:7px;}
+.wc-abs-list{display:flex;flex-wrap:wrap;gap:4px 10px;}
+.wc-abs-p{font-size:11.5px;color:var(--txt);white-space:nowrap;}
+.wc-abs-sus{color:#ff7a7a;}
+.wc-abs-doubt{color:var(--dim);}
 .wc-matches{display:flex;flex-direction:column;gap:7px;}
 .wc-m{background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:8px 10px;}
 .wc-mline{display:flex;align-items:center;gap:8px;}
@@ -1701,6 +1843,16 @@ const CSS = `
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
+.wc-sc-wrap{margin-top:6px;}
+.wc-scbtn{display:flex;align-items:center;gap:4px;background:none;border:none;color:var(--cyan);font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;}
+.wc-sc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:5px;}
+.wc-sc-col{background:#13161b;border:1px solid var(--line);border-radius:8px;padding:7px 9px;display:flex;flex-direction:column;gap:4px;min-width:0;}
+.wc-sc-team{font-size:11px;font-weight:700;color:var(--dim);margin-bottom:2px;}
+.wc-sc-p{display:flex;align-items:baseline;justify-content:space-between;gap:6px;}
+.wc-sc-n{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.wc-sc-n em{font-style:normal;color:var(--lime);font-size:10px;}
+.wc-sc-p b{font-family:'JetBrains Mono';font-size:11.5px;color:var(--cyan);flex:none;}
+.wc-sc-meta{color:var(--dim);font-size:10.5px;line-height:1.45;margin-top:5px;}
 .pf-h2h-badge{font-size:11px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:8px;padding:6px 12px;text-align:center;margin-bottom:6px;}
 .wc-pc{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 4px;border-radius:7px;background:#1b1f25;flex:1;min-width:0;}
 .wc-pc b{font-size:10px;color:var(--dim);font-weight:700;white-space:nowrap;}
