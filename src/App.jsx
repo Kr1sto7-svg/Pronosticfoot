@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { ArrowLeftRight, ChevronDown, Info, Plug, ShieldAlert, TrendingUp, Trophy, RotateCcw, Target, Layers, Radio, Users } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronDown, Info, Pencil, Plug, ShieldAlert, TrendingUp, Trophy, RotateCcw, Target, Layers, Radio, Users, X } from "lucide-react";
 
 /* =========================================================================
    PronosticFoot — prototype web mobile
@@ -520,8 +520,19 @@ function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS, rho
 
 /* ---------- stockage persistant ---------- */
 const store = {
-  async get(k) { try { if (!window.storage) return null; const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; } catch { return null; } },
-  async set(k, v) { try { if (window.storage) await window.storage.set(k, JSON.stringify(v)); } catch {} },
+  async get(k) {
+    try {
+      if (window.storage) { const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; }
+      const v = localStorage.getItem("pf:" + k);
+      return v == null ? null : JSON.parse(v);
+    } catch { return null; }
+  },
+  async set(k, v) {
+    try {
+      if (window.storage) { await window.storage.set(k, JSON.stringify(v)); return; }
+      localStorage.setItem("pf:" + k, JSON.stringify(v));
+    } catch {}
+  },
 };
 
 /* ========================= UI commun ========================= */
@@ -788,7 +799,45 @@ const formatFrDate = (iso) => {
 function ScoreInput({ value, onChange, live }) {
   return <input className={"wc-score" + (live ? " wc-score-live" : "")} inputMode="numeric" maxLength={2} value={value == null ? "" : value} placeholder="–" onChange={(e) => onChange(e.target.value)} />;
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveIds, matchMeta }) {
+/* Saisie d'un score avec validation explicite : le score tapé reste un brouillon
+ * tant qu'il n'est pas validé (✓). Une fois validé, il est sauvegardé, pris en
+ * compte dans les calculs, et verrouillé — le crayon permet de le corriger. */
+function MatchScoreBox({ id, r, isLive, onValidate, onClear }) {
+  const validated = !!r.ok;
+  const [editing, setEditing] = useState(false);
+  const [hg, setHg] = useState("");
+  const [ag, setAg] = useState("");
+  useEffect(() => {
+    if (!editing) { setHg(r.hg == null ? "" : String(r.hg)); setAg(r.ag == null ? "" : String(r.ag)); }
+  }, [r.hg, r.ag, editing]);
+  const clamp = (v) => { const n = parseInt(v, 10); return isNaN(n) ? null : Math.max(0, Math.min(20, n)); };
+  const digits = (v) => v.replace(/\D/g, "").slice(0, 2);
+  const canSave = clamp(hg) != null && clamp(ag) != null;
+  const canErase = editing && hg === "" && ag === "";
+  const save = () => {
+    if (canSave) { onValidate(id, clamp(hg), clamp(ag)); setEditing(false); }
+    else if (canErase) { onClear(id); setEditing(false); }
+  };
+  if (validated && !editing) {
+    return (
+      <span className="wc-mscore">
+        <span className="wc-final" title="Score validé">{r.hg}<i>–</i>{r.ag}</span>
+        <button className="wc-mbtn wc-mbtn-edit" title="Corriger le score" onClick={() => setEditing(true)}><Pencil size={13} /></button>
+      </span>
+    );
+  }
+  return (
+    <span className="wc-mscore">
+      {isLive && !validated && <span className="wc-live-tag">live</span>}
+      <ScoreInput value={hg} onChange={(v) => setHg(digits(v))} live={isLive && !validated} />
+      <i>–</i>
+      <ScoreInput value={ag} onChange={(v) => setAg(digits(v))} live={isLive && !validated} />
+      <button className="wc-mbtn wc-mbtn-ok" disabled={!canSave && !canErase} title={canErase ? "Effacer le score" : "Valider et sauvegarder le score"} onClick={save}><Check size={15} /></button>
+      {editing && <button className="wc-mbtn" title="Annuler la correction" onClick={() => setEditing(false)}><X size={14} /></button>}
+    </span>
+  );
+}
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const played = groupPairs(gi).filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
@@ -828,7 +877,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onScore, liveI
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
-              <span className="wc-mscore">{isLive && <span className="wc-live-tag">live</span>}<ScoreInput value={r.hg} onChange={(v) => onScore(id, "hg", v)} live={isLive} /><i>–</i><ScoreInput value={r.ag} onChange={(v) => onScore(id, "ag", v)} live={isLive} /></span>
+              <MatchScoreBox id={id} r={r} isLive={isLive} onValidate={onValidate} onClear={onClear} />
               <span className="wc-mt wc-r">{short(tb.n)} {tb.f}</span></div>
             {p && <div className="wc-pred">
               <span className={"wc-pc" + (p.pH >= p.pD && p.pH >= p.pA ? " wc-pc-top" : "")}>
@@ -987,16 +1036,10 @@ function WorldCupTab({ intlMatches = [] }) {
   }, [groups, effectiveResults, ko, adjPool]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
-  const onScore = (id, side, val) => {
-    const base = effectiveResults[id] || { hg: null, ag: null };
-    setResults((p) => {
-      const cur = { ...(p[id] || base) };
-      cur[side] = val === "" ? null : Math.max(0, Math.min(20, parseInt(val, 10) || 0));
-      const n = { ...p, [id]: cur };
-      if (cur.hg == null && cur.ag == null) delete n[id];
-      return n;
-    });
-  };
+  // Validation explicite : le score n'est sauvegardé et pris en compte dans les
+  // calculs (classements, Elo, probabilités) qu'au clic sur le bouton ✓.
+  const onValidate = (id, hg, ag) => setResults((p) => ({ ...p, [id]: { hg, ag, ok: 1 } }));
+  const onClear = (id) => setResults((p) => { const n = { ...p }; delete n[id]; return n; });
   const onPick = (id, ti) => setKo((p) => { const n = { ...p }; if (n[id] === ti) delete n[id]; else n[id] = ti; return n; });
   const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setGroups(defaultGroups()); } };
 
@@ -1012,8 +1055,8 @@ function WorldCupTab({ intlMatches = [] }) {
       {champ && <div className="pf-card wc-champ"><Trophy size={20} /><div><div className="wc-champ-k">Vainqueur {wc.rounds[4].ties[0].decided ? "" : "projeté"}</div><div className="wc-champ-v">{champ.f} {champ.n}</div></div></div>}
 
       {view === "groups" ? (<>
-        <div className="wc-hint">Saisis les scores réels au fil du tournoi : classements, qualifications et probabilités se recalculent automatiquement. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onScore={onScore} liveIds={liveIds} matchMeta={matchMeta} />)}
+        <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} />)}
       </>) : (<>
         <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
         {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} />)}
@@ -1647,6 +1690,11 @@ const CSS = `
 .wc-score{width:34px;height:32px;background:#15181d;border:1px solid var(--line);border-radius:8px;color:var(--txt);font-family:'JetBrains Mono';font-weight:700;font-size:16px;text-align:center;outline:none;}
 .wc-score:focus{border-color:var(--cyan);}
 .wc-score-live{border-color:var(--lime);color:var(--lime);}
+.wc-mbtn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;background:#15181d;border:1px solid var(--line);border-radius:8px;color:var(--dim);cursor:pointer;padding:0;}
+.wc-mbtn-ok{color:var(--lime);border-color:rgba(163,230,53,.45);}
+.wc-mbtn-ok:disabled{opacity:.3;cursor:default;}
+.wc-mbtn-edit{color:var(--cyan);}
+.wc-final{display:flex;align-items:center;gap:5px;height:32px;padding:0 8px;font-family:'JetBrains Mono';font-weight:700;font-size:16px;color:var(--lime);background:rgba(163,230,53,.08);border:1px solid rgba(163,230,53,.3);border-radius:8px;}
 .wc-live-tag{font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;letter-spacing:.5px;text-transform:uppercase;line-height:1.4;}
 .wc-mmeta{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
 .wc-mdate{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);}
