@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "feat: auto-sync WC scores, dates TV, effectifs stats par équipe",
+    message: "feat: validation des scores CdM, stockage localStorage, blessures/suspensions, buteurs probables par match",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

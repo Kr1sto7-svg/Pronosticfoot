@@ -508,6 +508,39 @@ function groupTable(group, gi, results, eff) {
   rows.forEach((r) => (r.gd = r.gf - r.ga));
   return [...rows].sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || (eff ? eff[b.ti].elo - eff[a.ti].elo : POOL[b.ti].elo - POOL[a.ti].elo));
 }
+/* Situation de chaque équipe dans son groupe, dans l'ordre CHRONOLOGIQUE officiel
+ * (WC_MATCHES) : points, matchs joués et séquence de résultats (W/L/D). Sert à
+ * détecter les équipes qui doivent réagir (défaite au 1er match, dos au mur). */
+function teamGroupSituation(group, gi, results) {
+  const sit = group.map(() => ({ played: 0, points: 0, seq: [] }));
+  WC_MATCHES[gi].forEach(({ x, y }) => {
+    const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
+    if (!r || r.hg == null || r.ag == null) return;
+    sit[x].played++; sit[y].played++;
+    if (r.hg > r.ag) { sit[x].points += 3; sit[x].seq.push("W"); sit[y].seq.push("L"); }
+    else if (r.hg < r.ag) { sit[y].points += 3; sit[y].seq.push("W"); sit[x].seq.push("L"); }
+    else { sit[x].points++; sit[y].points++; sit[x].seq.push("D"); sit[y].seq.push("D"); }
+  });
+  return sit;
+}
+/* Facteur de "prise de risque" (0 → 1) pour les matchs de groupe restants :
+ * une équipe qui a perdu son 1er match cherche à gagner le suivant ; dos au mur
+ * (0 pt après 2 matchs), elle prend un maximum de risques. Plus le facteur est
+ * élevé, plus on pousse l'attaque (et plus on fragilise la défense). */
+function riskFactor(s) {
+  if (!s || !s.played) return 0;
+  const lostOpener = s.seq[0] === "L";
+  if (s.played >= 2 && s.points === 0) return 1;            // dos au mur : tout pour la gagne
+  if (s.played >= 2 && lostOpener && s.points <= 1) return 0.7;
+  if (s.played === 1 && lostOpener) return 0.6;             // a perdu son 1er match
+  return 0;
+}
+/* Applique la prise de risque : attaque dopée, défense plus exposée (def = buts
+ * encaissés, donc on l'augmente). Effet borné pour rester réaliste. */
+function applyRisk(team, risk) {
+  if (!risk) return team;
+  return { ...team, att: team.att * (1 + 0.10 * risk), def: team.def * (1 + 0.08 * risk) };
+}
 function seedOrder(n) { let p = [1, 2]; while (p.length < n) { const s = p.length * 2 + 1, nx = []; for (const x of p) { nx.push(x); nx.push(s - x); } p = nx; } return p; }
 function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS, rho = RHO) {
   const order = seedOrder(32);
@@ -665,14 +698,31 @@ async function fetchClubLive(league) {
   clubLiveCache[league] = out;
   return out;
 }
-function MatchTab({ intlMatches = [] }) {
+function MatchTab({ intlMatches = [], matchRequest }) {
   const [scope, setScope] = useState("intl"); // "intl" = sélections Mondial, "club" = championnats
   const [clubLeague, setClubLeague] = useState("FL1");
   const [h, setH] = useState(0), [a, setA] = useState(1), [neutral, setNeutral] = useState(true);
   const [o1, setO1] = useState(""), [ox, setOx] = useState(""), [o2, setO2] = useState("");
   const [openHow, setOpenHow] = useState(false), [openApi, setOpenApi] = useState(false);
+  // Prise de risque importée du contexte Mondial (par nom d'équipe) : ne s'applique
+  // qu'aux équipes du match ouvert via "Détails", pas si on en choisit d'autres.
+  const [riskMap, setRiskMap] = useState({});
   const setScopeSafe = (s) => { setScope(s); setH(0); setA(1); setNeutral(s === "intl"); };
   const setLeagueSafe = (l) => { setClubLeague(l); setH(0); setA(1); };
+  // Raccourci "Détails" depuis l'onglet Mondial : on bascule en mode International
+  // (terrain neutre) et on présélectionne les deux équipes du match cliqué.
+  useEffect(() => {
+    if (!matchRequest) return;
+    const p = intlPool(intlMatches);
+    const hi = p.findIndex((t) => t.n === matchRequest.home);
+    const ai = p.findIndex((t) => t.n === matchRequest.away);
+    if (hi < 0 || ai < 0) return;
+    setScope("intl"); setNeutral(true); setH(hi); setA(ai);
+    const rm = {};
+    if (matchRequest.riskA > 0) rm[matchRequest.home] = matchRequest.riskA;
+    if (matchRequest.riskB > 0) rm[matchRequest.away] = matchRequest.riskB;
+    setRiskMap(rm);
+  }, [matchRequest, intlMatches]);
   // Recalibrage live (mode National) : forces réelles de la saison en cours via le proxy.
   const [liveClub, setLiveClub] = useState({});
   const [liveState, setLiveState] = useState("");
@@ -691,7 +741,7 @@ function MatchTab({ intlMatches = [] }) {
   // alphabétique. National : clubs du championnat choisi, dont les forces att/def sont
   // fusionnées avec les stats live (poids selon matchs joués).
   const pool = useMemo(() => {
-    if (scope === "intl") return adjustPoolWithIntl(intlMatches, [...POOL, ...EXTRA_NATIONS]).sort((x, y) => x.n.localeCompare(y.n, "fr"));
+    if (scope === "intl") return intlPool(intlMatches);
     const base = CLUB_POOL[clubLeague];
     const live = liveClub[clubLeague];
     if (!live) return base;
@@ -712,10 +762,13 @@ function MatchTab({ intlMatches = [] }) {
   const leagueAvg = scope === "intl" ? WC_AVG : ((liveInfo && liveInfo.leagueAvg) || LEAGUE_GOALS_AVG[clubLeague] || BASE_GOALS);
   const rho = scope === "intl" ? LEAGUE_RHO.WC : (LEAGUE_RHO[clubLeague] || RHO);
   const home = pool[h], away = pool[a], same = h === a;
+  // Prise de risque appliquée uniquement en mode International, aux équipes du match Mondial ouvert.
+  const homeRisk = scope === "intl" ? (riskMap[home.n] || 0) : 0;
+  const awayRisk = scope === "intl" ? (riskMap[away.n] || 0) : 0;
   const h2h = useMemo(() => scope === "intl" ? getH2HFromIntl(intlMatches, home.n, away.n) : [], [scope, home.n, away.n, intlMatches]);
   const R = useMemo(() => {
     if (same) return null;
-    const p = predict(home, away, neutral, leagueAvg, rho);
+    const p = predict(applyRisk(home, homeRisk), applyRisk(away, awayRisk), neutral, leagueAvg, rho);
     if (h2h.length < 2) return p;
     let hw = 0, dr = 0, aw = 0;
     h2h.forEach((m) => { if (m.hg > m.ag) hw++; else if (m.hg < m.ag) aw++; else dr++; });
@@ -724,7 +777,7 @@ function MatchTab({ intlMatches = [] }) {
     const pH = (p.pH * (1 - w) + (hw / n) * w), pD = (p.pD * (1 - w) + (dr / n) * w), pA = (p.pA * (1 - w) + (aw / n) * w);
     const s = pH + pD + pA || 1;
     return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
-  }, [same, home, away, neutral, leagueAvg, rho, h2h]);
+  }, [same, home, away, homeRisk, awayRisk, neutral, leagueAvg, rho, h2h]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
@@ -751,6 +804,7 @@ function MatchTab({ intlMatches = [] }) {
         <label className="pf-neutral"><input type="checkbox" checked={neutral} onChange={(e) => setNeutral(e.target.checked)} /><span>Terrain neutre (tournoi)</span></label>
       </section>
       {same && <div className="pf-warn">Choisis deux équipes différentes.</div>}
+      {R && (homeRisk > 0 || awayRisk > 0) && <div className="pf-risk-badge">⚡ Contexte Mondial : {[homeRisk > 0 ? home.n : null, awayRisk > 0 ? away.n : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
       {R && R.h2hN > 0 && <div className="pf-h2h-badge">🔁 {R.h2hN} confrontation{R.h2hN > 1 ? "s" : ""} directe{R.h2hN > 1 ? "s" : ""} prise{R.h2hN > 1 ? "s" : ""} en compte</div>}
       {R && (<>
         <section className="pf-card">
@@ -931,9 +985,10 @@ function MatchScorers({ ta, tb, lh, la, absA, absB }) {
     </div>
   );
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences }) {
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
+  const situation = teamGroupSituation(group, gi, results);
   const played = groupPairs(gi).filter(([x, y]) => { const r = results["G" + LETTERS[gi] + "-" + x + "-" + y]; return r && r.hg != null && r.ag != null; }).length;
   const absRows = absences ? group.map((ti) => ({ ti, list: absences[ti] || [] })).filter((r) => r.list.length) : [];
   return (
@@ -981,7 +1036,10 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
           const done = r.hg != null && r.ag != null;
           const isLive = liveIds ? liveIds.has(id) : false;
           const mm = { dateIso, channel: m6 ? "M6 · beIN" : "beIN Sports" };
-          const p = !done ? predict(eff[group[x]], eff[group[y]], true, WC_AVG, LEAGUE_RHO.WC) : null;
+          // Prise de risque : une équipe qui a perdu son 1er match (ou dos au mur)
+          // attaque plus et s'expose davantage pour ses matchs de groupe restants.
+          const rx = riskFactor(situation[x]), ry = riskFactor(situation[y]);
+          const p = !done ? predict(applyRisk(eff[group[x]], rx), applyRisk(eff[group[y]], ry), true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
@@ -998,14 +1056,16 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
                 <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
               </span>
             </div>}
+            {p && (rx > 0 || ry > 0) && <div className="wc-risk">⚡ {[rx > 0 ? short(ta.n) : null, ry > 0 ? short(tb.n) : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
             {p && <MatchScorers ta={ta} tb={tb} lh={p.lh} la={p.la} absA={absences ? absences[group[x]] : null} absB={absences ? absences[group[y]] : null} />}
+            <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(ta.n, tb.n, rx, ry)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>
           </div>);
         })}</div>
       </div>)}
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick }) {
+function KnockoutTie({ tie, eff, onPick, onOpenMatch }) {
   if (tie.a == null && tie.b == null) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
@@ -1041,11 +1101,12 @@ function KnockoutTie({ tie, eff, onPick }) {
           <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
         </span>
       </div>}
+      {A && B && <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(A.n, B.n)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
       <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.decided ? "réel" : "projeté"}</span>
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, defaultOpen }) {
+function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1060,11 +1121,11 @@ function RoundBlock({ round, eff, onPick, defaultOpen }) {
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} />)}</div></>}
     </div>
   );
 }
-function WorldCupTab({ intlMatches = [] }) {
+function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const [view, setView] = useState("groups");
   const [groups, setGroups] = useState(defaultGroups);
   const [results, setResults] = useState({});
@@ -1191,10 +1252,10 @@ function WorldCupTab({ intlMatches = [] }) {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} />)}
       </>) : (<>
         <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} />)}
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} />)}
       </>)}
     </>
   );
@@ -1463,6 +1524,13 @@ function adjustPoolWithIntl(intlMatches, basePool = POOL) {
   });
 }
 
+// Pool de l'onglet Match en mode International : les 48 qualifiés + sélections non
+// qualifiées, recalibrés (FIFA + résultats récents) puis triés alphabétiquement.
+// Source unique d'ordre pour que le bouton "Détails" retrouve les bons index.
+function intlPool(intlMatches) {
+  return adjustPoolWithIntl(intlMatches, [...POOL, ...EXTRA_NATIONS]).sort((x, y) => x.n.localeCompare(y.n, "fr"));
+}
+
 // Extrait les confrontations directes depuis les matchs internationaux (vue depuis homeN).
 function getH2HFromIntl(intlMatches, homeN, awayN) {
   return intlMatches
@@ -1689,9 +1757,14 @@ function SquadsTab() {
 export default function App() {
   const [tab, setTab] = useState("match");
   const [intlMatches, setIntlMatches] = useState([]);
+  const [matchRequest, setMatchRequest] = useState(null);
   useEffect(() => {
     fetch("/api/stats?source=intl").then((r) => r.json()).then((d) => setIntlMatches(d.matches || [])).catch(() => {});
   }, []);
+  // Bouton "Détails" d'un match du Mondial : pré-remplit l'onglet Match et l'ouvre.
+  // Nouvel objet à chaque clic → l'effet de MatchTab se redéclenche même équipes identiques.
+  // riskA/riskB = prise de risque de chaque équipe (contexte de groupe), 0 en phase finale.
+  const openMatch = (home, away, riskA = 0, riskB = 0) => { setMatchRequest({ home, away, riskA, riskB }); setTab("match"); };
   return (
     <div className="pf-root">
       <style>{CSS}</style>
@@ -1707,7 +1780,7 @@ export default function App() {
         <button className={tab === "squads" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("squads")}>Effectifs</button>
       </nav>
       <main className="pf-main">
-        {tab === "match" ? <MatchTab intlMatches={intlMatches} /> : tab === "cdm" ? <WorldCupTab intlMatches={intlMatches} /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
+        {tab === "match" ? <MatchTab intlMatches={intlMatches} matchRequest={matchRequest} /> : tab === "cdm" ? <WorldCupTab intlMatches={intlMatches} onOpenMatch={openMatch} /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
         <footer className="pf-footer"><ShieldAlert size={14} /><span>Outil d'analyse pédagogique. Les paris comportent un risque de perte ; aucun modèle ne garantit de gain. Jeu excessif : <b>09 74 75 13 13</b> (Joueurs Info Service, appel non surtaxé).</span></footer>
       </main>
     </div>
@@ -1843,6 +1916,10 @@ const CSS = `
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
+.wc-risk{font-size:10.5px;color:var(--amber);margin-top:6px;line-height:1.4;}
+.wc-detailsbtn{margin-top:8px;width:100%;background:rgba(200,255,66,.08);border:1px solid rgba(200,255,66,.32);color:var(--lime);font-family:'Saira Condensed';font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;padding:7px;border-radius:8px;cursor:pointer;transition:.15s;}
+.wc-detailsbtn:hover{background:rgba(200,255,66,.16);}
+.wc-detailsbtn:active{transform:scale(.98);}
 .wc-sc-wrap{margin-top:6px;}
 .wc-scbtn{display:flex;align-items:center;gap:4px;background:none;border:none;color:var(--cyan);font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;}
 .wc-sc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:5px;}
@@ -1854,6 +1931,7 @@ const CSS = `
 .wc-sc-p b{font-family:'JetBrains Mono';font-size:11.5px;color:var(--cyan);flex:none;}
 .wc-sc-meta{color:var(--dim);font-size:10.5px;line-height:1.45;margin-top:5px;}
 .pf-h2h-badge{font-size:11px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:8px;padding:6px 12px;text-align:center;margin-bottom:6px;}
+.pf-risk-badge{font-size:11.5px;color:var(--amber);background:rgba(255,186,58,.1);border:1px solid rgba(255,186,58,.28);border-radius:8px;padding:7px 12px;text-align:center;margin-bottom:6px;line-height:1.4;}
 .wc-pc{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 4px;border-radius:7px;background:#1b1f25;flex:1;min-width:0;}
 .wc-pc b{font-size:10px;color:var(--dim);font-weight:700;white-space:nowrap;}
 .wc-pc em{font-style:normal;font-family:'JetBrains Mono';font-size:12px;color:#c4cbd4;font-weight:700;}
