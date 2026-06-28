@@ -148,6 +148,82 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---- COMPOSITIONS / XI DE DÉPART (?home=NomAnglais&away=NomAnglais) ----
+   * Via API-Football (compos confirmées ~1 h avant le coup d'envoi). Calcule un
+   * facteur att/déf par équipe à partir de TROIS signaux demandés :
+   *   1) la formation (offensive type 4-3-3 / 4-2-3-1 vs défensive type 5-4-1) ;
+   *   2) les titulaires habituels ou non (rotation = top apparitions sur le banc) ;
+   *   3) la qualité offensive du XI (buts + passes décisives des titulaires). */
+  if (source === "lineup") {
+    const qh = req.query.home, qa = req.query.away;
+    if (!qh || !qa) return res.status(400).json({ error: "paramètres 'home' et 'away' requis" });
+    res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
+    const key = process.env.APIFOOTBALL_KEY;
+    if (!key) return res.status(200).json({ source, supported: false, note: "APIFOOTBALL_KEY non configurée — compositions indisponibles." });
+    const AH = { "x-apisports-key": key };
+    const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+    const posCode = (p) => { const s = (p || "").toUpperCase(); return s === "G" ? "G" : s === "D" ? "D" : s === "M" ? "M" : s === "F" ? "A" : ""; };
+    const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+    // Indice offensif des formations courantes (1 = neutre, >1 offensive, <1 défensive).
+    const FORM_OFF = { "3-4-3": 1.12, "4-3-3": 1.08, "3-5-2": 1.05, "4-2-3-1": 1.05, "3-4-2-1": 1.05, "4-4-2": 1.00, "4-1-4-1": 0.98, "4-4-1-1": 0.97, "4-5-1": 0.93, "5-3-2": 0.92, "5-4-1": 0.88 };
+    const season = req.query.season || "2026";
+    const matchTeam = (apiName, q) => { const n = norm(apiName), nq = norm(q); return n.includes(nq) || nq.includes(n); };
+    try {
+      const fr = await fetch("https://v3.football.api-sports.io/fixtures?league=1&season=" + season, { headers: AH });
+      const fj = await fr.json();
+      const fx = (fj.response || []).find((x) => (matchTeam(x.teams.home.name, qh) && matchTeam(x.teams.away.name, qa)) || (matchTeam(x.teams.home.name, qa) && matchTeam(x.teams.away.name, qh)));
+      if (!fx) return res.status(200).json({ source, supported: true, found: false, note: "Match introuvable sur API-Football pour cette saison." });
+      const lr = await fetch("https://v3.football.api-sports.io/fixtures/lineups?fixture=" + fx.fixture.id, { headers: AH });
+      const lj = await lr.json();
+      const lineups = lj.response || [];
+      if (!lineups.length) return res.status(200).json({ source, supported: true, found: true, ready: false, note: "Compositions pas encore publiées (≈1 h avant le coup d'envoi)." });
+      const playerStats = async (teamId) => {
+        const out = {};
+        for (const s of [season, String(Number(season) - 1)]) {
+          try {
+            const pr = await fetch("https://v3.football.api-sports.io/players?team=" + teamId + "&season=" + s, { headers: AH });
+            const pj = await pr.json();
+            (pj.response || []).forEach((p) => { const st = (p.statistics || [])[0] || {}; if (p.player && p.player.name) out[norm(p.player.name)] = { apps: (st.games && st.games.appearences) || 0, goals: (st.goals && st.goals.total) || 0, assists: (st.goals && st.goals.assists) || 0 }; });
+            if (Object.keys(out).length) break;
+          } catch {}
+        }
+        return out;
+      };
+      const buildSide = async (l) => {
+        const xi = (l.startXI || []).map((e) => ({ name: e.player.name, pos: posCode(e.player.pos), number: e.player.number }));
+        const bench = (l.substitutes || []).map((e) => ({ name: e.player.name, pos: posCode(e.player.pos) }));
+        const stats = await playerStats(l.team.id);
+        const get = (n) => stats[norm(n)] || { apps: 0, goals: 0, assists: 0 };
+        // (2) titulaires habituels = top 11 par apparitions
+        const regulars = new Set(Object.entries(stats).sort((a, b) => b[1].apps - a[1].apps).slice(0, 11).map(([n]) => n));
+        const xiNorm = xi.map((p) => norm(p.name));
+        const xiRegN = xiNorm.filter((n) => regulars.has(n)).length;
+        const rotationShare = regulars.size ? clamp((Math.min(11, regulars.size) - xiRegN) / Math.min(11, regulars.size), 0, 1) : 0;
+        // (3) qualité offensive : buts + 0,7·passes pondérés par poste, titulaires vs banc
+        const off = (p) => { const s = get(p.name); return (p.pos === "A" ? 1 : p.pos === "M" ? 0.8 : p.pos === "D" ? 0.25 : 0) * (s.goals + 0.7 * s.assists); };
+        const xiOff = xi.reduce((a, p) => a + off(p), 0), benchOff = bench.reduce((a, p) => a + off(p), 0), totOff = xiOff + benchOff;
+        let attMul = 1, defMul = 1; const notes = [];
+        // (1) formation : offensive -> +attaque ; moins de défenseurs -> +buts encaissés
+        const f = l.formation || "";
+        const parts = f.split("-").map(Number).filter((n) => !isNaN(n));
+        const formOff = FORM_OFF[f] ?? (parts.length ? clamp(1 + 0.05 * (parts[parts.length - 1] - 3), 0.9, 1.12) : 1);
+        attMul *= formOff;
+        if (parts.length) defMul *= clamp(1 - 0.05 * (parts[0] - 4), 0.9, 1.12);
+        if (formOff >= 1.05) notes.push("formation offensive (" + f + ")"); else if (formOff <= 0.93 && f) notes.push("formation défensive (" + f + ")");
+        if (totOff > 0) { const share = xiOff / totOff; attMul *= clamp(0.85 + 0.3 * share, 0.85, 1.12); if (share < 0.6) notes.push("buteurs/passeurs clés sur le banc"); }
+        if (rotationShare > 0.3) { attMul *= clamp(1 - 0.15 * rotationShare, 0.88, 1); defMul *= clamp(1 + 0.12 * rotationShare, 1, 1.12); notes.push("équipe remaniée (" + xiRegN + "/11 habituels)"); }
+        attMul = clamp(attMul, 0.8, 1.2); defMul = clamp(defMul, 0.85, 1.2);
+        return { team: l.team.name, formation: f, xi, bench, factor: { attMul, defMul, notes, xiRegulars: xiRegN } };
+      };
+      const pick = (q) => lineups.find((l) => matchTeam(l.team.name, q)) || null;
+      const lh = pick(qh), la = pick(qa);
+      const home = lh ? await buildSide(lh) : null, away = la ? await buildSide(la) : null;
+      return res.status(200).json({ source, supported: true, found: true, ready: true, updated: new Date().toISOString(), home, away });
+    } catch (e) {
+      return res.status(200).json({ source, supported: false, note: "Compositions injoignables : " + String(e.message || e) });
+    }
+  }
+
   if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {
@@ -338,6 +414,9 @@ export default async function handler(req, res) {
       const all = j.matches || [];
       const map = (m) => ({
         id: m.id, date: m.utcDate, status: m.status, matchday: m.matchday,
+        // stage = tour (GROUP_STAGE, LAST_32, LAST_16, QUARTER_FINALS, SEMI_FINALS, FINAL…)
+        // winner = vainqueur officiel (gère prolongation + tirs au but) : HOME_TEAM / AWAY_TEAM / DRAW.
+        stage: m.stage, winner: m.score ? m.score.winner : null,
         homeId: m.homeTeam.id, awayId: m.awayTeam.id,
         home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
         homeGoals: m.score && m.score.fullTime ? m.score.fullTime.home : null,

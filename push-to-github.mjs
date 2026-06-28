@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "feat: validation des scores CdM, stockage localStorage, blessures/suspensions, buteurs probables par match",
+    message: "feat: tableau final officiel FIFA 2026 (bracket fixe + vraies affiches/résultats via API), alias noms football-data (scores de groupe manquants), facteur XI de départ (formation off/déf, titulaires habituels, buts/passes) avec auto-chargement à l'approche du coup d'envoi",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

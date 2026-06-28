@@ -541,28 +541,115 @@ function applyRisk(team, risk) {
   if (!risk) return team;
   return { ...team, att: team.att * (1 + 0.10 * risk), def: team.def * (1 + 0.08 * risk) };
 }
-function seedOrder(n) { let p = [1, 2]; while (p.length < n) { const s = p.length * 2 + 1, nx = []; for (const x of p) { nx.push(x); nx.push(s - x); } p = nx; } return p; }
-function buildKnockout(eff, qualRanked, ko, results, leagueAvg = BASE_GOALS, rho = RHO) {
-  const order = seedOrder(32);
-  const slots = order.map((s) => qualRanked[s - 1] ?? null);
-  let ties = []; for (let k = 0; k < 16; k++) ties.push([slots[2 * k], slots[2 * k + 1]]);
+/* Applique le facteur "composition" (XI de départ) calculé par le proxy : la
+ * formation (offensive/défensive), les titulaires habituels et la qualité
+ * offensive (buts/passes) du XI ajustent l'attaque et la défense de l'équipe. */
+function applyLineupF(team, f) {
+  if (!f) return team;
+  return { ...team, att: team.att * (f.attMul ?? 1), def: team.def * (f.defMul ?? 1) };
+}
+/* ---------- Tableau final OFFICIEL Coupe du Monde 2026 ----------
+ * Le bracket 2026 est FIXE : chaque place R32 dépend d'une position de groupe
+ * précise (et NON d'un seeding global par classement). Réf. FIFA, matchs 73-88.
+ *   ["W","X"] = vainqueur du groupe X · ["R","X"] = 2e du groupe X
+ *   ["3",[groupes autorisés]] = un 3e parmi ces groupes (table FIFA des 3es).
+ * R32_SLOTS est rangé dans l'ordre "feuilles" du tableau : la mise en paire
+ * séquentielle (ties[2k], ties[2k+1]) reproduit alors automatiquement
+ * R16 -> Finale dans le bon ordre (matchs 89-102). */
+const gIdx = (L) => LETTERS.indexOf(L);
+const R32_SLOTS = [
+  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },
+  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },
+  { m: 73, a: ["R", "A"], b: ["R", "B"] },
+  { m: 75, a: ["W", "F"], b: ["R", "C"] },
+  { m: 83, a: ["R", "K"], b: ["R", "L"] },
+  { m: 84, a: ["W", "H"], b: ["R", "J"] },
+  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },
+  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },
+  { m: 76, a: ["W", "C"], b: ["R", "F"] },
+  { m: 78, a: ["R", "E"], b: ["R", "I"] },
+  { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },
+  { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },
+  { m: 86, a: ["W", "J"], b: ["R", "H"] },
+  { m: 88, a: ["R", "D"], b: ["R", "G"] },
+  { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },
+  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },
+];
+/* Attribue les 8 meilleurs 3es aux 8 places "3e" en respectant les groupes
+ * autorisés par la FIFA pour chacune (matching exact par backtracking : une
+ * affectation complète existe pour toute combinaison de 8 groupes qualifiés). */
+function assignThirds(qualThirdGroups) {
+  const slots = R32_SLOTS.filter((s) => s.b[0] === "3").sort((x, y) => x.m - y.m);
+  const groups = [...qualThirdGroups];
+  const res = {}, used = new Set();
+  const bt = (i) => {
+    if (i === slots.length) return true;
+    const allowed = slots[i].b[1].map(gIdx);
+    for (const g of groups) {
+      if (used.has(g) || !allowed.includes(g)) continue;
+      used.add(g); res[slots[i].m] = g;
+      if (bt(i + 1)) return true;
+      used.delete(g); delete res[slots[i].m];
+    }
+    return false;
+  };
+  bt(0);
+  return res;
+}
+// Vainqueur officiel d'une affiche réelle : winner API (gère prolongation/t.a.b.),
+// sinon score 90' si non nul, sinon indécis.
+function realWinner(f) {
+  if (!f) return null;
+  if (f.winner === "HOME_TEAM") return f.a;
+  if (f.winner === "AWAY_TEAM") return f.b;
+  if (f.hg != null && f.ag != null && f.hg !== f.ag) return f.hg > f.ag ? f.a : f.b;
+  return null;
+}
+function buildKnockout(eff, tables, bestThirds, ko, results, koFixtures, leagueAvg = BASE_GOALS, rho = RHO) {
+  const real = koFixtures || { R32: [], R16: [], QF: [], SF: [], F: [] };
+  // Groupes dont le 3e fait partie des 8 meilleurs (donc qualifié).
+  const qualThirdGroups = tables
+    .map((t, gi) => ({ gi, ti: t[2] ? t[2].ti : null }))
+    .filter((x) => x.ti != null && bestThirds.has(x.ti))
+    .map((x) => x.gi);
+  const thirdSlot = assignThirds(qualThirdGroups);
+  const resolveSide = (side, matchNo) => {
+    const [kind, arg] = side;
+    if (kind === "W") { const t = tables[gIdx(arg)]; return t && t[0] ? t[0].ti : null; }
+    if (kind === "R") { const t = tables[gIdx(arg)]; return t && t[1] ? t[1].ti : null; }
+    const g = thirdSlot[matchNo]; // place "3e" -> groupe attribué -> 3e de ce groupe
+    return g != null && tables[g] && tables[g][2] ? tables[g][2].ti : null;
+  };
+  // R32 : la place "a" est toujours un vainqueur/2e (jamais un 3e) -> ancre fiable.
+  // Si l'API fournit la vraie affiche contenant cette ancre, on l'utilise telle quelle
+  // (cela fixe notamment le 3e adverse exactement comme dans le tirage officiel).
+  let ties = R32_SLOTS.map((s) => {
+    const anchor = resolveSide(s.a, s.m);
+    const projB = resolveSide(s.b, s.m);
+    const f = anchor != null ? real.R32.find((x) => x.a === anchor || x.b === anchor) : null;
+    if (f) return [anchor, f.a === anchor ? f.b : f.a, f];
+    return [anchor, projB, null];
+  });
   const defs = [["R32", 16], ["R16", 8], ["QF", 4], ["SF", 2], ["F", 1]];
   const rounds = [];
   for (const [name, count] of defs) {
     const out = { name, ties: [] }, winners = [];
     for (let k = 0; k < count; k++) {
-      const [a, b] = ties[k] || [null, null];
+      const [a, b, rfPre] = ties[k] || [null, null, null];
       const id = name + "-" + k;
-      let prob = 0.5, winner = null, decided = false, kb = null;
+      let prob = 0.5, winner = null, decided = false, kb = null, isReal = false;
       if (a != null && b != null) {
         kb = predictKnockout(eff[a], eff[b], leagueAvg, rho);
         prob = kb.advA;
-        const m = ko[id], sc = results[id];
-        if (m != null) { winner = m; decided = true; }
+        // Affiche réelle de l'API pour ce tour (R32 via l'ancre, sinon par paire d'équipes).
+        const rf = rfPre || (real[name] || []).find((x) => (x.a === a && x.b === b) || (x.a === b && x.b === a)) || null;
+        const manual = ko[id], sc = results[id], rw = realWinner(rf);
+        if (manual != null) { winner = manual; decided = true; }           // choix manuel (simulation) prioritaire
+        else if (rw != null) { winner = rw; decided = true; isReal = true; } // résultat réel de l'API
         else if (sc && sc.hg != null && sc.ag != null && sc.hg !== sc.ag) { winner = sc.hg > sc.ag ? a : b; decided = true; }
-        else winner = prob >= 0.5 ? a : b;
+        else winner = prob >= 0.5 ? a : b;                                   // projection
       } else winner = a != null ? a : b;
-      out.ties.push({ id, a, b, prob, winner, decided, kb });
+      out.ties.push({ id, a, b, prob, winner, decided, kb, isReal });
       winners.push(winner);
     }
     rounds.push(out);
@@ -985,7 +1072,40 @@ function MatchScorers({ ta, tb, lh, la, absA, absB }) {
     </div>
   );
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch }) {
+/* Clé de cache d'une compo (noms anglais, ordre domicile→extérieur du match). */
+const lineupKey = (aN, bN) => (NAT_EN[aN] || aN) + "|" + (NAT_EN[bN] || bN);
+/* Affiche les XI réels (formation + onze) et signale ce qui pèse sur le pronostic.
+ * Le chargement est déclenché à l'ouverture ; le facteur att/déf est appliqué en
+ * amont par le parent (applyLineupF) dès que la compo est prête. */
+function LineupPanel({ ta, tb, data, onOpen }) {
+  const [open, setOpen] = useState(false);
+  const st = data ? data.state : null;
+  const toggle = () => { const n = !open; setOpen(n); if (n) onOpen && onOpen(); };
+  const ready = st === "ok" && data.ready;
+  return (
+    <div className="wc-sc-wrap">
+      <button className="wc-scbtn" onClick={toggle}>🧩 Compositions (XI de départ) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
+      {open && st === "loading" && <div className="wc-sc-meta">Chargement des compositions…</div>}
+      {open && st === "ok" && !data.ready && <div className="wc-sc-meta">{data.note || "Compositions indisponibles."}</div>}
+      {open && st === "err" && <div className="wc-sc-meta">Compositions indisponibles pour ce match.</div>}
+      {open && ready && (
+        <div className="wc-sc">
+          {[{ t: ta, s: data.home }, { t: tb, s: data.away }].map((c, ci) => (
+            <div key={ci} className="wc-sc-col">
+              <div className="wc-sc-team">{c.t.f} {short(c.t.n)}{c.s && c.s.formation ? <em> · {c.s.formation}</em> : null}</div>
+              {((c.s && c.s.xi) || []).map((p, i) => (
+                <div key={i} className="wc-sc-p"><span className="wc-sc-n">{p.number ? p.number + ". " : ""}{p.name}</span><b>{p.pos || "—"}</b></div>
+              ))}
+              {c.s && c.s.factor && c.s.factor.notes && c.s.factor.notes.length > 0 && <div className="wc-sc-meta">⚙️ {c.s.factor.notes.join(" · ")}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {open && ready && <div className="wc-sc-meta">XI réel intégré au pronostic : formation (offensive/défensive), titulaires habituels et buts/passes des joueurs alignés.</div>}
+    </div>
+  );
+}
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch, lineups, onLoadLineup }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const situation = teamGroupSituation(group, gi, results);
@@ -1039,7 +1159,11 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
           // Prise de risque : une équipe qui a perdu son 1er match (ou dos au mur)
           // attaque plus et s'expose davantage pour ses matchs de groupe restants.
           const rx = riskFactor(situation[x]), ry = riskFactor(situation[y]);
-          const p = !done ? predict(applyRisk(eff[group[x]], rx), applyRisk(eff[group[y]], ry), true, WC_AVG, LEAGUE_RHO.WC) : null;
+          // Facteur composition (XI réel) si la compo de ce match est chargée et prête.
+          const lu = lineups ? lineups[lineupKey(ta.n, tb.n)] : null;
+          const luReady = lu && lu.state === "ok" && lu.ready;
+          const fx = luReady && lu.home ? lu.home.factor : null, fy = luReady && lu.away ? lu.away.factor : null;
+          const p = !done ? predict(applyLineupF(applyRisk(eff[group[x]], rx), fx), applyLineupF(applyRisk(eff[group[y]], ry), fy), true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(ta.n)}</span>
@@ -1057,7 +1181,9 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
               </span>
             </div>}
             {p && (rx > 0 || ry > 0) && <div className="wc-risk">⚡ {[rx > 0 ? short(ta.n) : null, ry > 0 ? short(tb.n) : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
+            {p && luReady && <div className="wc-lineup-badge">🧩 Compositions réelles intégrées au pronostic</div>}
             {p && <MatchScorers ta={ta} tb={tb} lh={p.lh} la={p.la} absA={absences ? absences[group[x]] : null} absB={absences ? absences[group[y]] : null} />}
+            {p && <LineupPanel ta={ta} tb={tb} data={lu} onOpen={() => onLoadLineup && onLoadLineup(ta.n, tb.n)} />}
             <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(ta.n, tb.n, rx, ry)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>
           </div>);
         })}</div>
@@ -1065,7 +1191,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick, onOpenMatch }) {
+function KnockoutTie({ tie, eff, onPick, onOpenMatch, lineups, onLoadLineup }) {
   if (tie.a == null && tie.b == null) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
@@ -1076,8 +1202,12 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch }) {
     const favA = kb.advA >= kb.advB, fav = favA ? A : B;
     bd = { fav, advP: favA ? kb.advA : kb.advB, reg: favA ? kb.regA : kb.regB, et: favA ? kb.etA : kb.etB, pen: favA ? kb.penA : kb.penB };
   }
-  const teamA = (eff && tie.a != null) ? eff[tie.a] : A;
-  const teamB = (eff && tie.b != null) ? eff[tie.b] : B;
+  // Facteur composition (XI réel) appliqué au pronostic de l'affiche, si chargé.
+  const lu = (lineups && A && B) ? lineups[lineupKey(A.n, B.n)] : null;
+  const luReady = lu && lu.state === "ok" && lu.ready;
+  const fa = luReady && lu.home ? lu.home.factor : null, fb = luReady && lu.away ? lu.away.factor : null;
+  const teamA = applyLineupF((eff && tie.a != null) ? eff[tie.a] : A, fa);
+  const teamB = applyLineupF((eff && tie.b != null) ? eff[tie.b] : B, fb);
   const p = (!tie.decided && teamA && teamB) ? predict(teamA, teamB, true, WC_AVG, LEAGUE_RHO.WC) : null;
   return (
     <div className="wc-tie">
@@ -1101,12 +1231,14 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch }) {
           <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
         </span>
       </div>}
+      {p && luReady && <div className="wc-lineup-badge">🧩 Compositions intégrées au pronostic</div>}
+      {A && B && !tie.decided && <LineupPanel ta={A} tb={B} data={lu} onOpen={() => onLoadLineup && onLoadLineup(A.n, B.n)} />}
       {A && B && <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(A.n, B.n)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
-      <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.decided ? "réel" : "projeté"}</span>
+      <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.isReal ? "réel" : tie.decided ? "validé" : "projeté"}</span>
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch }) {
+function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, lineups, onLoadLineup }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1121,9 +1253,22 @@ function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch }) {
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} lineups={lineups} onLoadLineup={onLoadLineup} />)}</div></>}
     </div>
   );
+}
+// Normalise le "stage" football-data.org (LAST_32, ROUND_OF_16, QUARTER_FINALS…)
+// vers nos clés de tour. La petite finale (3e place) est hors bracket.
+function stageToRound(stage) {
+  const s = (stage || "").toUpperCase();
+  if (s.includes("GROUP")) return "group";
+  if (s.includes("32")) return "R32";
+  if (s.includes("16")) return "R16";
+  if (s.includes("QUARTER")) return "QF";
+  if (s.includes("SEMI")) return "SF";
+  if (s.includes("THIRD") || s.includes("3RD")) return null;
+  if (s.includes("FINAL")) return "F";
+  return null;
 }
 function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const [view, setView] = useState("groups");
@@ -1209,6 +1354,70 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const effectiveResults = useMemo(() => ({ ...apiMapped, ...results }), [apiMapped, results]);
   const liveIds = useMemo(() => new Set(Object.keys(apiMapped).filter((id) => !results[id])), [apiMapped, results]);
 
+  // Compositions (XI de départ) chargées à la demande, mises en cache par match.
+  // Une fois prêtes, leur facteur att/déf est appliqué au pronostic (applyLineupF).
+  const [lineups, setLineups] = useState({});
+  const loadLineup = async (aN, bN) => {
+    const k = lineupKey(aN, bN);
+    const cur = lineups[k];
+    // "Réglé" = inutile de réessayer : compo prête, ou indisponible structurellement
+    // (pas de clé API / match introuvable). Tant que c'est juste "pas encore publié"
+    // (found && !ready), on autorise une nouvelle tentative (au prochain tick / clic).
+    const settled = cur && cur.state === "ok" && (cur.ready || cur.supported === false || cur.found === false);
+    if (cur && (cur.state === "loading" || settled)) return;
+    setLineups((p) => ({ ...p, [k]: { state: "loading" } }));
+    try {
+      const qh = NAT_EN[aN] || aN, qa = NAT_EN[bN] || bN;
+      const r = await fetch("/api/stats?source=lineup&home=" + encodeURIComponent(qh) + "&away=" + encodeURIComponent(qa));
+      const d = await r.json();
+      setLineups((p) => ({ ...p, [k]: { state: "ok", ...d } }));
+    } catch { setLineups((p) => ({ ...p, [k]: { state: "err" } })); }
+  };
+
+  // Vrai tableau final tel que tiré/joué : on classe chaque affiche knockout de
+  // l'API par tour (R32/R16/QF/SF/F) -> buildKnockout l'utilise pour fixer les
+  // affiches exactes (dont l'attribution officielle des 3es) et les vainqueurs.
+  const koFixtures = useMemo(() => {
+    const out = { R32: [], R16: [], QF: [], SF: [], F: [] };
+    for (const m of rawApiMatches) {
+      const round = stageToRound(m.stage);
+      if (!round || round === "group") continue;
+      const hFr = EN_TO_FR_NORM[normName(m.home)], aFr = EN_TO_FR_NORM[normName(m.away)];
+      if (!hFr || !aFr) continue;
+      const a = POOL.findIndex((t) => t.n === hFr), b = POOL.findIndex((t) => t.n === aFr);
+      if (a < 0 || b < 0) continue;
+      out[round].push({ a, b, hg: m.homeGoals, ag: m.awayGoals, winner: m.winner, date: m.date });
+    }
+    return out;
+  }, [rawApiMatches]);
+
+  // Auto-chargement des compositions à l'approche du coup d'envoi (quota-safe) :
+  // seuls les matchs non joués dont le coup d'envoi est dans < 90 min (et jusqu'à
+  // ~3 h après, pour couvrir le match en cours) déclenchent un fetch, rafraîchi
+  // toutes les 10 min. Le facteur XI s'applique alors automatiquement au pronostic.
+  useEffect(() => {
+    const tick = () => {
+      const now = Date.now();
+      const imminent = (iso) => { const t = new Date(iso).getTime(); return t && (t - now) < 90 * 60 * 1000 && (now - t) < 3 * 3600 * 1000; };
+      groups.forEach((g, gi) => WC_MATCHES[gi].forEach((m) => {
+        const id = "G" + LETTERS[gi] + "-" + m.x + "-" + m.y;
+        const r = effectiveResults[id];
+        if (r && r.hg != null && r.ag != null) return; // déjà joué
+        const iso = (matchMeta[id] && matchMeta[id].dateIso) || m.iso;
+        if (!imminent(iso)) return;
+        loadLineup(POOL[g[m.x]].n, POOL[g[m.y]].n);
+      }));
+      Object.values(koFixtures).forEach((arr) => arr.forEach((f) => {
+        if (f.winner || (f.hg != null && f.ag != null)) return; // déjà joué/décidé
+        if (!imminent(f.date)) return;
+        loadLineup(POOL[f.a].n, POOL[f.b].n);
+      }));
+    };
+    tick();
+    const iv = setInterval(tick, 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [groups, effectiveResults, matchMeta, koFixtures, lineups]);
+
   // Les matchs du Mondial en cours sont déjà intégrés via les scores de groupes
   // (effectivePool + eloAfterGroups) : on les exclut ici pour ne pas compter
   // deux fois les mêmes buts dans les ratings.
@@ -1220,16 +1429,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    const qualRows = [];
-    tables.forEach((t) => { qualRows.push(t[0], t[1]); });
-    thirds.slice(0, 8).forEach((th) => qualRows.push(th));
-    const rank = [...qualRows]
-      .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo)
-      .map((r) => r.ti);
-    const rounds = buildKnockout(eff, rank, ko, effectiveResults, WC_AVG, LEAGUE_RHO.WC);
+    const rounds = buildKnockout(eff, tables, bestThirds, ko, effectiveResults, koFixtures, WC_AVG, LEAGUE_RHO.WC);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, effectiveResults, ko, adjPool, absences]);
+  }, [groups, effectiveResults, ko, adjPool, absences, koFixtures]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   // Validation explicite : le score n'est sauvegardé et pris en compte dans les
@@ -1252,10 +1455,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} lineups={lineups} onLoadLineup={loadLineup} />)}
       </>) : (<>
-        <div className="wc-hint">Tableau auto-alimenté par les classements. <b>Touche une équipe</b> pour la qualifier (gère prolongation/tirs au but). Tant que rien n'est saisi, le favori du modèle est affiché en « projeté ». Seeding simplifié par têtes de série (pas le slotting officiel FIFA).</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} />)}
+        <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). Les vraies affiches et résultats sont repris dès qu'ils sont disponibles via l'API (étiquette « réel ») ; sinon le favori du modèle est affiché en « projeté ». <b>Touche une équipe</b> pour forcer une qualification (gère prolongation/tirs au but).</div>
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} lineups={lineups} onLoadLineup={loadLineup} />)}
       </>)}
     </>
   );
@@ -1494,9 +1697,26 @@ const NAT_EN = {
   "Honduras": "Honduras", "Bolivie": "Bolivia", "Émirats arabes unis": "United Arab Emirates",
   "Oman": "Oman", "Bahreïn": "Bahrain", "Chine": "China PR",
 };
+/* Variantes de noms réellement renvoyées par football-data.org pour les
+ * sélections : sans ces alias, le match correspondant n'est pas reconnu et son
+ * score n'apparaît jamais dans l'onglet Mondial (cause des "scores manquants"). */
+const NAT_EN_ALIASES = {
+  "Czechia": "Tchéquie", "Czech Republic": "Tchéquie",
+  "Korea Republic": "Corée du Sud", "Republic of Korea": "Corée du Sud",
+  "United States": "États-Unis",
+  "DR Congo": "RD Congo", "Congo DR": "RD Congo",
+  "Cabo Verde": "Cap-Vert",
+  "Bosnia and Herzegovina": "Bosnie-Herzégovine", "Bosnia & Herzegovina": "Bosnie-Herzégovine",
+  "Côte d'Ivoire": "Côte d'Ivoire", "Ivory Coast": "Côte d'Ivoire",
+  "IR Iran": "Iran",
+  "Türkiye": "Turquie", "Turkey": "Turquie",
+  "Saudi Arabia": "Arabie saoudite",
+  "New Zealand": "Nouvelle-Zélande",
+};
 const EN_TO_FR_NORM = (() => {
   const m = {};
   Object.entries(NAT_EN).forEach(([fr, en]) => { m[normName(en)] = fr; });
+  Object.entries(NAT_EN_ALIASES).forEach(([en, fr]) => { m[normName(en)] = fr; });
   return m;
 })();
 
@@ -1917,6 +2137,7 @@ const CSS = `
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
 .wc-risk{font-size:10.5px;color:var(--amber);margin-top:6px;line-height:1.4;}
+.wc-lineup-badge{font-size:10.5px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:7px;padding:5px 9px;margin-top:6px;line-height:1.4;}
 .wc-detailsbtn{margin-top:8px;width:100%;background:rgba(200,255,66,.08);border:1px solid rgba(200,255,66,.32);color:var(--lime);font-family:'Saira Condensed';font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;padding:7px;border-radius:8px;cursor:pointer;transition:.15s;}
 .wc-detailsbtn:hover{background:rgba(200,255,66,.16);}
 .wc-detailsbtn:active{transform:scale(.98);}
