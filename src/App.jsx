@@ -548,35 +548,47 @@ function applyLineupF(team, f) {
   if (!f) return team;
   return { ...team, att: team.att * (f.attMul ?? 1), def: team.def * (f.defMul ?? 1) };
 }
-/* Saisie manuelle de la composition (par équipe, reportée d'un match à l'autre).
- * Formations proposées + indice offensif (1 = neutre, >1 offensive, <1 défensive). */
-const FORMATIONS = ["", "4-3-3", "4-2-3-1", "3-4-3", "3-5-2", "4-4-2", "4-1-4-1", "4-4-1-1", "4-5-1", "5-3-2", "5-4-1", "3-4-2-1", "4-3-1-2"];
-const FORM_OFF = { "3-4-3": 1.12, "4-3-3": 1.08, "4-3-1-2": 1.05, "3-5-2": 1.05, "4-2-3-1": 1.05, "3-4-2-1": 1.05, "4-4-2": 1.00, "4-1-4-1": 0.98, "4-4-1-1": 0.97, "4-5-1": 0.93, "5-3-2": 0.92, "5-4-1": 0.88 };
+/* Compo saisie par équipe (XI cliquable, reporté d'un match à l'autre). */
 const lastNm = (s) => { const t = (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").trim().split(/\s+/); return t[t.length - 1] || ""; };
-/* Facteur att/déf d'une compo saisie (formation + XI + équipe remaniée). Le XI est
- * pondéré par les buts/passes (buteurs football-data WC, gratuits) : aligner ou
- * laisser au repos un buteur clé change le pronostic. Renvoie null si rien n'est
- * saisi/activé -> le pronostic reste "sans compo". `teamScorers` = [{name,goals,assists}]. */
-function compFactor(comp, teamScorers) {
-  if (!comp) return null;
-  const hasXI = comp.xiText != null && comp.xiText.trim() !== "";
-  if (!comp.formation && !comp.remanie && !hasXI) return null;
+// Poste football-data -> G/D/M/A. Défaut milieu si inconnu.
+function posGroup(p) {
+  const s = (p || "").toLowerCase();
+  if (s.includes("keeper") || s === "goalkeeper") return "G";
+  if (s.includes("back") || s.includes("defen")) return "D";
+  if (s.includes("midfield") || s.includes("milieu")) return "M";
+  if (s.includes("offence") || s.includes("forward") || s.includes("striker") || s.includes("wing") || s.includes("attack")) return "A";
+  return "M";
+}
+const POS_LBL = { G: "Gardien", D: "Déf", M: "Mil", A: "Att" };
+const POS_ORDER = { G: 0, D: 1, M: 2, A: 3 };
+/* Compte G/D/M/A d'un XI (résolu depuis l'effectif) + formation déduite (D-M-A). */
+function xiShape(xi, squad) {
+  const byL = {}; (squad || []).forEach((p) => { byL[lastNm(p.name)] = p; });
+  const players = (xi || []).map((n) => byL[lastNm(n)] || { name: n, pos: "M", goals: 0, assists: 0 });
+  const c = { G: 0, D: 0, M: 0, A: 0 };
+  players.forEach((p) => { c[p.pos] = (c[p.pos] || 0) + 1; });
+  return { players, c, formation: c.D + "-" + c.M + "-" + c.A };
+}
+/* Facteur att/déf d'une compo : la forme (nb d'attaquants/défenseurs) ET la qualité
+ * offensive du XI (buts/passes des joueurs alignés) pèsent sur le pronostic.
+ * Renvoie null si la compo n'a pas été activée -> pronostic "sans compo". */
+function compFactor(comp, squad) {
+  if (!comp || (!comp.xi && !comp.remanie)) return null;
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   let attMul = 1, defMul = 1; const notes = [];
-  if (comp.formation) {
-    const parts = comp.formation.split("-").map(Number).filter((n) => !isNaN(n));
-    const fo = FORM_OFF[comp.formation] ?? (parts.length ? clamp(1 + 0.05 * (parts[parts.length - 1] - 3), 0.9, 1.12) : 1);
-    attMul *= fo;
-    if (parts.length) defMul *= clamp(1 - 0.05 * (parts[0] - 4), 0.9, 1.12);
-    if (fo >= 1.05) notes.push("formation offensive (" + comp.formation + ")");
-    else if (fo <= 0.93) notes.push("formation défensive (" + comp.formation + ")");
-  }
-  if (hasXI && teamScorers && teamScorers.length) {
-    const xiSet = new Set(comp.xiText.split("\n").map(lastNm).filter(Boolean));
-    const weight = (p) => (p.goals || 0) + 0.7 * (p.assists || 0);
-    const inOff = teamScorers.filter((p) => xiSet.has(lastNm(p.name))).reduce((a, p) => a + weight(p), 0);
-    const totOff = teamScorers.reduce((a, p) => a + weight(p), 0);
-    if (totOff > 0) { const share = clamp(inOff / totOff, 0, 1); attMul *= clamp(0.8 + 0.35 * share, 0.8, 1.15); if (share < 0.55) notes.push("buteurs/passeurs clés hors du XI"); }
+  if (comp.xi && comp.xi.length) {
+    const { c } = xiShape(comp.xi, squad);
+    // forme : 3 att / 4 déf = neutre ; plus d'attaquants -> +attaque ; plus de défenseurs -> -buts encaissés.
+    attMul *= clamp(1 + 0.06 * (c.A - 3), 0.85, 1.16);
+    defMul *= clamp(1 - 0.05 * (c.D - 4), 0.9, 1.12);
+    // qualité offensive : part des buts+passes de l'effectif présente dans le XI.
+    if (squad && squad.length) {
+      const xiSet = new Set(comp.xi.map(lastNm));
+      const w = (p) => (p.goals || 0) + 0.7 * (p.assists || 0);
+      const inOff = squad.filter((p) => xiSet.has(lastNm(p.name))).reduce((a, p) => a + w(p), 0);
+      const totOff = squad.reduce((a, p) => a + w(p), 0);
+      if (totOff > 0) { const share = clamp(inOff / totOff, 0, 1); attMul *= clamp(0.82 + 0.3 * share, 0.82, 1.14); if (share < 0.55) notes.push("buteurs/passeurs clés hors du XI"); }
+    }
   }
   if (comp.remanie) { attMul *= 0.9; defMul *= 1.08; notes.push("équipe remaniée"); }
   return { attMul: clamp(attMul, 0.78, 1.2), defMul: clamp(defMul, 0.85, 1.2), notes, manual: true };
@@ -1105,40 +1117,57 @@ function MatchScorers({ ta, tb, lh, la, absA, absB }) {
     </div>
   );
 }
-/* Compositions : éditeur MANUEL par équipe (formation + XI + remaniée), reporté
- * d'un match à l'autre (clé = nom d'équipe). Le XI est PRÉ-REMPLI avec un onze
- * probable (effectif football-data) ; tu n'as qu'à corriger à la marge. Tant que
- * tu ne touches à rien, le pronostic reste calculé "sans compo". */
-function LineupPanel({ ta, tb, compA, compB, onCompChange, prefillA, prefillB }) {
+/* Compositions : éditeur CLIC-BOUTON par équipe, reporté d'un match à l'autre
+ * (clé = nom d'équipe). Chaque titulaire est un menu : on le remplace par un autre
+ * joueur de l'effectif (poste D/M/A indiqué). Le XI est pré-rempli (onze probable),
+ * la formation se déduit du XI, et les attaquants/buteurs sont récapitulés.
+ * Tant qu'on n'a rien changé, le pronostic reste calculé "sans compo". */
+function LineupPanel({ ta, tb, compA, compB, onCompChange, squadA, squadB, prefillA, prefillB }) {
   const [open, setOpen] = useState(false);
-  const Editor = ({ t, c, prefill }) => {
-    const cur = c || {};
-    const xiVal = cur.xiText != null ? cur.xiText : (prefill || "");
+  const stat = (p) => (p.goals || p.assists) ? " (" + (p.goals || 0) + "b/" + (p.assists || 0) + "p)" : "";
+  const Editor = ({ t, c, squad, prefill }) => {
+    const hasSquad = squad && squad.length;
+    const xi = (c && c.xi) ? c.xi : prefill;
+    const opts = hasSquad ? [...squad].sort((a, b) => (POS_ORDER[a.pos] - POS_ORDER[b.pos]) || a.name.localeCompare(b.name)) : [];
+    const shape = hasSquad ? xiShape(xi, squad) : null;
+    const setStarter = (i, name) => { const nx = [...xi]; nx[i] = name; onCompChange(t.n, { xi: nx }); };
     return (
       <div className="wc-lu-col">
-        <div className="wc-lu-team">{t.f} {short(t.n)}</div>
-        <select className="wc-lu-sel" value={cur.formation || ""} onChange={(e) => onCompChange(t.n, { formation: e.target.value })}>
-          {FORMATIONS.map((f) => <option key={f} value={f}>{f || "Formation…"}</option>)}
-        </select>
-        <textarea className="wc-lu-xi" rows={11} spellCheck={false} value={xiVal} placeholder="Un joueur par ligne (11)" onChange={(e) => onCompChange(t.n, { xiText: e.target.value })} />
-        <label className="wc-lu-chk"><input type="checkbox" checked={!!cur.remanie} onChange={(e) => onCompChange(t.n, { remanie: e.target.checked })} /> remaniée</label>
+        <div className="wc-lu-team">{t.f} {short(t.n)}{shape ? <em> · {shape.formation}</em> : null}</div>
+        {!hasSquad && <div className="wc-sc-meta">Effectif indisponible (football-data) pour cette équipe — réessaie plus tard.</div>}
+        {hasSquad && xi.map((n, i) => {
+          const p = squad.find((s) => lastNm(s.name) === lastNm(n)) || { pos: "M" };
+          return (
+            <div key={i} className="wc-lu-row">
+              <span className={"wc-lu-pos wc-lu-pos-" + p.pos}>{POS_LBL[p.pos]}</span>
+              <select className="wc-lu-rsel" value={n} onChange={(e) => setStarter(i, e.target.value)}>
+                {!opts.some((o) => o.name === n) && <option value={n}>{n}</option>}
+                {opts.map((o, oi) => <option key={oi} value={o.name}>{POS_LBL[o.pos]} · {o.name}{stat(o)}</option>)}
+              </select>
+            </div>
+          );
+        })}
+        {shape && <div className="wc-lu-sum">{shape.c.G} G · {shape.c.D} D · {shape.c.M} M · <b>{shape.c.A} A</b></div>}
+        {shape && shape.c.A > 0 && <div className="wc-sc-meta">Attaquants : {shape.players.filter((p) => p.pos === "A").map((p) => p.name + stat(p)).join(" · ")}</div>}
+        {hasSquad && <label className="wc-lu-chk"><input type="checkbox" checked={!!(c && c.remanie)} onChange={(e) => onCompChange(t.n, { remanie: e.target.checked })} /> remaniée</label>}
+        {hasSquad && c && c.xi && <button className="wc-lu-reset" onClick={() => onCompChange(t.n, { xi: prefill })}>↺ onze probable</button>}
       </div>
     );
   };
   return (
     <div className="wc-sc-wrap">
-      <button className="wc-scbtn" onClick={() => setOpen(!open)}>🧩 Compositions (formation / XI) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
+      <button className="wc-scbtn" onClick={() => setOpen(!open)}>🧩 Compositions (XI cliquable) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
       {open && (
         <div className="wc-lu">
-          <Editor t={ta} c={compA} prefill={prefillA} />
-          <Editor t={tb} c={compB} prefill={prefillB} />
+          <Editor t={ta} c={compA} squad={squadA} prefill={prefillA} />
+          <Editor t={tb} c={compB} squad={squadB} prefill={prefillB} />
         </div>
       )}
-      {open && <div className="wc-sc-meta">XI pré-rempli (onze probable) — corrige les noms et la formation. Aligner/laisser au repos un buteur clé change le pronostic. Ta saisie est mémorisée et reprise au match suivant de l'équipe.</div>}
+      {open && <div className="wc-sc-meta">Clique un joueur pour le remplacer par un autre de l'effectif (poste affiché). Le nombre d'attaquants/défenseurs et les buts/passes des titulaires ajustent le pronostic. Saisie mémorisée et reprise au match suivant de l'équipe.</div>}
     </div>
   );
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch, comp, onCompChange, prefillFor, scorersFor }) {
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch, comp, onCompChange, prefillFor, squadFor }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const situation = teamGroupSituation(group, gi, results);
@@ -1195,8 +1224,8 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
           // Facteur composition saisie (formation + XI + remaniée), par équipe.
           // Rien saisi -> null -> le pronostic reste calculé "sans compo".
           const compA = comp ? comp[ta.n] : null, compB = comp ? comp[tb.n] : null;
-          const fx = compFactor(compA, scorersFor ? scorersFor(ta.n) : null);
-          const fy = compFactor(compB, scorersFor ? scorersFor(tb.n) : null);
+          const fx = compFactor(compA, squadFor ? squadFor(ta.n) : null);
+          const fy = compFactor(compB, squadFor ? squadFor(tb.n) : null);
           const p = !done ? predict(applyLineupF(applyRisk(eff[group[x]], rx), fx), applyLineupF(applyRisk(eff[group[y]], ry), fy), true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
@@ -1217,7 +1246,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
             {p && (rx > 0 || ry > 0) && <div className="wc-risk">⚡ {[rx > 0 ? short(ta.n) : null, ry > 0 ? short(tb.n) : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
             {p && (fx || fy) && <div className="wc-lineup-badge">🧩 Composition saisie intégrée au pronostic</div>}
             {p && <MatchScorers ta={ta} tb={tb} lh={p.lh} la={p.la} absA={absences ? absences[group[x]] : null} absB={absences ? absences[group[y]] : null} />}
-            {p && <LineupPanel ta={ta} tb={tb} compA={compA} compB={compB} onCompChange={onCompChange} prefillA={prefillFor ? prefillFor(ta.n) : ""} prefillB={prefillFor ? prefillFor(tb.n) : ""} />}
+            {p && <LineupPanel ta={ta} tb={tb} compA={compA} compB={compB} onCompChange={onCompChange} squadA={squadFor ? squadFor(ta.n) : []} squadB={squadFor ? squadFor(tb.n) : []} prefillA={prefillFor ? prefillFor(ta.n) : []} prefillB={prefillFor ? prefillFor(tb.n) : []} />}
             <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(ta.n, tb.n, rx, ry)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>
           </div>);
         })}</div>
@@ -1225,7 +1254,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, prefillFor, scorersFor }) {
+function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, prefillFor, squadFor }) {
   if (tie.a == null && tie.b == null) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
@@ -1238,8 +1267,8 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, prefil
   }
   // Facteur composition saisie (par équipe), comme en phase de groupes.
   const compA = (comp && A) ? comp[A.n] : null, compB = (comp && B) ? comp[B.n] : null;
-  const fa = compFactor(compA, (scorersFor && A) ? scorersFor(A.n) : null);
-  const fb = compFactor(compB, (scorersFor && B) ? scorersFor(B.n) : null);
+  const fa = compFactor(compA, (squadFor && A) ? squadFor(A.n) : null);
+  const fb = compFactor(compB, (squadFor && B) ? squadFor(B.n) : null);
   const teamA = applyLineupF((eff && tie.a != null) ? eff[tie.a] : A, fa);
   const teamB = applyLineupF((eff && tie.b != null) ? eff[tie.b] : B, fb);
   const p = (!tie.decided && teamA && teamB) ? predict(teamA, teamB, true, WC_AVG, LEAGUE_RHO.WC) : null;
@@ -1266,13 +1295,13 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, prefil
         </span>
       </div>}
       {p && (fa || fb) && <div className="wc-lineup-badge">🧩 Composition saisie intégrée au pronostic</div>}
-      {A && B && !tie.decided && <LineupPanel ta={A} tb={B} compA={compA} compB={compB} onCompChange={onCompChange} prefillA={prefillFor ? prefillFor(A.n) : ""} prefillB={prefillFor ? prefillFor(B.n) : ""} />}
+      {A && B && !tie.decided && <LineupPanel ta={A} tb={B} compA={compA} compB={compB} onCompChange={onCompChange} squadA={squadFor ? squadFor(A.n) : []} squadB={squadFor ? squadFor(B.n) : []} prefillA={prefillFor ? prefillFor(A.n) : []} prefillB={prefillFor ? prefillFor(B.n) : []} />}
       {A && B && <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(A.n, B.n)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
       <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.isReal ? "réel" : tie.decided ? "validé" : "projeté"}</span>
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onCompChange, prefillFor, scorersFor }) {
+function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onCompChange, prefillFor, squadFor }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1287,7 +1316,7 @@ function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onComp
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} scorersFor={scorersFor} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} squadFor={squadFor} />)}</div></>}
     </div>
   );
 }
@@ -1312,7 +1341,7 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const [loaded, setLoaded] = useState(false);
   const [rawApiMatches, setRawApiMatches] = useState([]);
   // Compositions saisies (PAR ÉQUIPE, reportées d'un match à l'autre), persistées :
-  // { "France": { formation, xiText, remanie }, ... }.
+  // { "France": { xi:[11 noms], remanie }, ... }.
   const [comp, setComp] = useState({});
   useEffect(() => { (async () => {
     const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3"), c = await store.get("wc:comp:v1");
@@ -1381,20 +1410,24 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
         const fr = EN_TO_FR_NORM[normName(t.name)]; if (!fr) return;
         const sc = scByTeam[normName(t.name)] || [];
         const byLast = {}; sc.forEach((p) => { byLast[lastNm(p.name)] = p; });
-        const squad = (t.squad || []).map((p) => { const s = byLast[lastNm(p.name)]; return { name: p.name, pos: p.position || "", goals: s ? s.goals : 0, assists: s ? s.assists : 0 }; });
-        out[fr] = { squad, scorers: sc };
+        const squad = (t.squad || []).map((p) => { const s = byLast[lastNm(p.name)]; return { name: p.name, pos: posGroup(p.position), goals: s ? s.goals : 0, assists: s ? s.assists : 0 }; });
+        out[fr] = { squad };
       });
       if (Object.keys(out).length) setSquads(out);
     } catch {}
   })(); }, []);
-  // Onze probable de pré-remplissage : le gardien + les 10 meilleurs (buts+passes).
+  const squadFor = (frName) => (squads[frName] && squads[frName].squad) || [];
+  // Onze probable de pré-remplissage : 1 G, 4 D, 3 M, 3 A (meilleurs buts+passes
+  // par ligne), complété si une ligne manque d'effectif. Renvoie la liste de noms.
   const prefillFor = (frName) => {
-    const sq = squads[frName]; if (!sq || !sq.squad.length) return "";
-    const gk = sq.squad.find((p) => p.pos === "Goalkeeper");
-    const rest = sq.squad.filter((p) => p !== gk).sort((a, b) => (b.goals + b.assists) - (a.goals + a.assists));
-    return (gk ? [gk] : []).concat(rest).slice(0, 11).map((p) => p.name).join("\n");
+    const squad = squadFor(frName); if (!squad.length) return [];
+    const byPos = (k) => squad.filter((p) => p.pos === k).sort((a, b) => (b.goals + b.assists) - (a.goals + a.assists));
+    const need = { G: 1, D: 4, M: 3, A: 3 };
+    const pick = [], used = new Set();
+    for (const k of ["G", "D", "M", "A"]) byPos(k).slice(0, need[k]).forEach((p) => { pick.push(p); used.add(p.name); });
+    for (const p of squad) { if (pick.length >= 11) break; if (!used.has(p.name)) { pick.push(p); used.add(p.name); } }
+    return pick.slice(0, 11).map((p) => p.name);
   };
-  const scorersFor = (frName) => (squads[frName] && squads[frName].scorers) || [];
 
   const apiParsed = useMemo(() => {
     const mapped = {}, meta = {};
@@ -1486,10 +1519,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} scorersFor={scorersFor} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} squadFor={squadFor} />)}
       </>) : (<>
         <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). Les vraies affiches et résultats sont repris dès qu'ils sont disponibles via l'API (étiquette « réel ») ; sinon le favori du modèle est affiché en « projeté ». <b>Touche une équipe</b> pour forcer une qualification (gère prolongation/tirs au but).</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} scorersFor={scorersFor} />)}
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} prefillFor={prefillFor} squadFor={squadFor} />)}
       </>)}
     </>
   );
@@ -2170,14 +2203,23 @@ const CSS = `
 .wc-risk{font-size:10.5px;color:var(--amber);margin-top:6px;line-height:1.4;}
 .wc-lineup-badge{font-size:10.5px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:7px;padding:5px 9px;margin-top:6px;line-height:1.4;}
 .wc-lu{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
-.wc-lu-col{background:#13161b;border:1px solid var(--line);border-radius:8px;padding:7px 9px;display:flex;flex-direction:column;gap:6px;min-width:0;}
-.wc-lu-team{font-size:11px;font-weight:700;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.wc-lu-sel{background:#0e1116;border:1px solid var(--line);border-radius:7px;color:var(--txt);font-size:12px;padding:6px 7px;outline:none;}
-.wc-lu-sel option{background:#15181d;}
-.wc-lu-xi{background:#0e1116;border:1px solid var(--line);border-radius:7px;color:var(--txt);font-size:11.5px;line-height:1.5;padding:6px 7px;outline:none;resize:vertical;font-family:'Saira',sans-serif;width:100%;box-sizing:border-box;}
-.wc-lu-xi:focus{border-color:var(--cyan);}
-.wc-lu-chk{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);cursor:pointer;}
+.wc-lu-col{background:#13161b;border:1px solid var(--line);border-radius:8px;padding:7px 8px;display:flex;flex-direction:column;gap:4px;min-width:0;}
+.wc-lu-team{font-size:11.5px;font-weight:700;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wc-lu-team em{font-style:normal;color:var(--cyan);font-family:'JetBrains Mono';font-size:10.5px;}
+.wc-lu-row{display:flex;align-items:center;gap:5px;min-width:0;}
+.wc-lu-pos{flex:none;width:30px;text-align:center;font-family:'Saira Condensed';font-weight:700;font-size:9px;letter-spacing:.02em;text-transform:uppercase;padding:2px 0;border-radius:4px;background:#1b1f25;color:var(--dim);}
+.wc-lu-pos-G{background:rgba(255,186,58,.16);color:var(--amber);}
+.wc-lu-pos-D{background:rgba(70,211,255,.14);color:var(--cyan);}
+.wc-lu-pos-M{background:rgba(255,255,255,.08);color:#c4cbd4;}
+.wc-lu-pos-A{background:rgba(200,255,66,.16);color:var(--lime);}
+.wc-lu-rsel{flex:1;min-width:0;background:#0e1116;border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11.5px;padding:5px 4px;outline:none;}
+.wc-lu-rsel:focus{border-color:var(--cyan);}
+.wc-lu-rsel option{background:#15181d;}
+.wc-lu-sum{font-family:'JetBrains Mono';font-size:10.5px;color:var(--dim);margin-top:3px;}
+.wc-lu-sum b{color:var(--lime);}
+.wc-lu-chk{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);cursor:pointer;margin-top:2px;}
 .wc-lu-chk input{width:15px;height:15px;accent-color:var(--cyan);}
+.wc-lu-reset{background:none;border:0;color:var(--cyan);font-size:10.5px;cursor:pointer;text-align:left;padding:0;}
 .wc-detailsbtn{margin-top:8px;width:100%;background:rgba(200,255,66,.08);border:1px solid rgba(200,255,66,.32);color:var(--lime);font-family:'Saira Condensed';font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;padding:7px;border-radius:8px;cursor:pointer;transition:.15s;}
 .wc-detailsbtn:hover{background:rgba(200,255,66,.16);}
 .wc-detailsbtn:active{transform:scale(.98);}
