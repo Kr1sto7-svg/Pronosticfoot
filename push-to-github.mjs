@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "feat: tableau final officiel FIFA 2026 (bracket fixe + vraies affiches via API), alias noms football-data (scores de groupe manquants), compositions par équipe via éditeur CLIC-BOUTON (chaque titulaire remplaçable par un joueur de l'effectif, poste D/M/A affiché, onze probable pré-rempli, formation et nb d'attaquants déduits, pondération buts/passes) ; pronostic 'sans compo' par défaut, mis à jour dès édition",
+    message: "feat: calibrage des effets de formation à DEUX FACES (offensive = +buts/+encaissés, défensive = inverse) via FORM_PROFILE att/def ; interaction des formations des 2 équipes dans le match (2 blocs offensifs = match ouvert, 2 défensifs = fermé) ; éditeur compo clic-bouton + sélecteur de formation ; bracket officiel FIFA 2026",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

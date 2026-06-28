@@ -569,29 +569,56 @@ function xiShape(xi, squad) {
   players.forEach((p) => { c[p.pos] = (c[p.pos] || 0) + 1; });
   return { players, c, formation: c.D + "-" + c.M + "-" + c.A };
 }
-/* Facteur att/déf d'une compo : la forme (nb d'attaquants/défenseurs) ET la qualité
- * offensive du XI (buts/passes des joueurs alignés) pèsent sur le pronostic.
- * Renvoie null si la compo n'a pas été activée -> pronostic "sans compo". */
+// Formations sélectionnables + PROFIL à deux faces : att = multiplicateur d'attaque,
+// def = multiplicateur de buts ENCAISSÉS (>1 = plus vulnérable). Une formation
+// offensive marque plus mais encaisse plus ; une défensive l'inverse.
+const FORMATIONS = ["", "4-3-3", "4-2-3-1", "3-4-3", "3-5-2", "4-4-2", "4-1-4-1", "4-4-1-1", "4-5-1", "5-3-2", "5-4-1", "3-4-2-1", "4-3-1-2"];
+const FORM_PROFILE = {
+  "3-4-3":   { att: 1.16, def: 1.14 },
+  "3-4-2-1": { att: 1.10, def: 1.09 },
+  "4-3-3":   { att: 1.10, def: 1.05 },
+  "3-5-2":   { att: 1.08, def: 1.09 },
+  "4-3-1-2": { att: 1.06, def: 1.06 },
+  "4-2-3-1": { att: 1.05, def: 1.01 },
+  "4-4-2":   { att: 1.00, def: 1.00 },
+  "4-4-1-1": { att: 0.97, def: 0.98 },
+  "4-1-4-1": { att: 0.95, def: 0.95 },
+  "4-5-1":   { att: 0.91, def: 0.93 },
+  "5-3-2":   { att: 0.89, def: 0.90 },
+  "5-4-1":   { att: 0.85, def: 0.87 },
+};
+/* Facteur att/déf d'une compo. Deux contributions :
+ *  1) la FORME — formation choisie (profil att/déf ci-dessus) OU, à défaut, déduite
+ *     du XI (nb d'attaquants/défenseurs), à double face (offensif = +buts/+encaissés) ;
+ *  2) la QUALITÉ OFFENSIVE du XI (buts/passes des joueurs alignés).
+ * Le pronostic combine ensuite les deux équipes : l'attaque ajustée de l'une
+ * rencontre la défense ajustée de l'autre (interaction des deux formations).
+ * Renvoie null si rien n'est activé -> pronostic "sans compo". */
 function compFactor(comp, squad) {
-  if (!comp || (!comp.xi && !comp.remanie)) return null;
+  if (!comp || (!comp.xi && !comp.formation && !comp.remanie)) return null;
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   let attMul = 1, defMul = 1; const notes = [];
-  if (comp.xi && comp.xi.length) {
+  if (comp.formation) {
+    const pr = FORM_PROFILE[comp.formation] || { att: 1, def: 1 };
+    attMul *= pr.att; defMul *= pr.def;
+    if (pr.att >= 1.05) notes.push("formation offensive (" + comp.formation + ")");
+    else if (pr.att <= 0.95) notes.push("formation défensive (" + comp.formation + ")");
+  } else if (comp.xi && comp.xi.length) {
     const { c } = xiShape(comp.xi, squad);
-    // forme : 3 att / 4 déf = neutre ; plus d'attaquants -> +attaque ; plus de défenseurs -> -buts encaissés.
-    attMul *= clamp(1 + 0.06 * (c.A - 3), 0.85, 1.16);
-    defMul *= clamp(1 - 0.05 * (c.D - 4), 0.9, 1.12);
-    // qualité offensive : part des buts+passes de l'effectif présente dans le XI.
-    if (squad && squad.length) {
-      const xiSet = new Set(comp.xi.map(lastNm));
-      const w = (p) => (p.goals || 0) + 0.7 * (p.assists || 0);
-      const inOff = squad.filter((p) => xiSet.has(lastNm(p.name))).reduce((a, p) => a + w(p), 0);
-      const totOff = squad.reduce((a, p) => a + w(p), 0);
-      if (totOff > 0) { const share = clamp(inOff / totOff, 0, 1); attMul *= clamp(0.82 + 0.3 * share, 0.82, 1.14); if (share < 0.55) notes.push("buteurs/passeurs clés hors du XI"); }
-    }
+    // Plus d'attaquants -> +attaque & +vulnérabilité ; plus de défenseurs -> l'inverse.
+    attMul *= clamp(1 + 0.06 * (c.A - 3) - 0.03 * (c.D - 4), 0.82, 1.18);
+    defMul *= clamp(1 + 0.05 * (c.A - 3) - 0.05 * (c.D - 4), 0.85, 1.16);
+  }
+  // Qualité offensive : part des buts+passes de l'effectif présente dans le XI.
+  if (comp.xi && comp.xi.length && squad && squad.length) {
+    const xiSet = new Set(comp.xi.map(lastNm));
+    const w = (p) => (p.goals || 0) + 0.7 * (p.assists || 0);
+    const inOff = squad.filter((p) => xiSet.has(lastNm(p.name))).reduce((a, p) => a + w(p), 0);
+    const totOff = squad.reduce((a, p) => a + w(p), 0);
+    if (totOff > 0) { const share = clamp(inOff / totOff, 0, 1); attMul *= clamp(0.78 + 0.34 * share, 0.78, 1.16); if (share < 0.55) notes.push("buteurs/passeurs clés hors du XI"); }
   }
   if (comp.remanie) { attMul *= 0.9; defMul *= 1.08; notes.push("équipe remaniée"); }
-  return { attMul: clamp(attMul, 0.78, 1.2), defMul: clamp(defMul, 0.85, 1.2), notes, manual: true };
+  return { attMul: clamp(attMul, 0.74, 1.24), defMul: clamp(defMul, 0.82, 1.24), notes, manual: true };
 }
 /* ---------- Tableau final OFFICIEL Coupe du Monde 2026 ----------
  * Le bracket 2026 est FIXE : chaque place R32 dépend d'une position de groupe
@@ -1133,7 +1160,10 @@ function LineupPanel({ ta, tb, compA, compB, onCompChange, squadA, squadB, prefi
     const setStarter = (i, name) => { const nx = [...xi]; nx[i] = name; onCompChange(t.n, { xi: nx }); };
     return (
       <div className="wc-lu-col">
-        <div className="wc-lu-team">{t.f} {short(t.n)}{shape ? <em> · {shape.formation}</em> : null}</div>
+        <div className="wc-lu-team">{t.f} {short(t.n)}{(c && c.formation) || shape ? <em> · {(c && c.formation) || shape.formation}</em> : null}</div>
+        <select className="wc-lu-fsel" value={(c && c.formation) || ""} onChange={(e) => onCompChange(t.n, { formation: e.target.value })}>
+          {FORMATIONS.map((f) => <option key={f} value={f}>{f ? "Formation " + f : "Formation : auto (selon le XI)"}</option>)}
+        </select>
         {!hasSquad && <div className="wc-sc-meta">Effectif indisponible (football-data) pour cette équipe — réessaie plus tard.</div>}
         {hasSquad && xi.map((n, i) => {
           const p = squad.find((s) => lastNm(s.name) === lastNm(n)) || { pos: "M" };
@@ -2212,6 +2242,8 @@ const CSS = `
 .wc-lu-pos-D{background:rgba(70,211,255,.14);color:var(--cyan);}
 .wc-lu-pos-M{background:rgba(255,255,255,.08);color:#c4cbd4;}
 .wc-lu-pos-A{background:rgba(200,255,66,.16);color:var(--lime);}
+.wc-lu-fsel{background:#0e1116;border:1px solid rgba(70,211,255,.3);border-radius:6px;color:var(--cyan);font-size:11.5px;font-weight:600;padding:5px 6px;outline:none;}
+.wc-lu-fsel option{background:#15181d;color:var(--txt);}
 .wc-lu-rsel{flex:1;min-width:0;background:#0e1116;border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11.5px;padding:5px 4px;outline:none;}
 .wc-lu-rsel:focus{border-color:var(--cyan);}
 .wc-lu-rsel option{background:#15181d;}
