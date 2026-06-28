@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "feat: tableau final officiel FIFA 2026 (bracket fixe + vraies affiches/résultats via API), alias noms football-data (scores de groupe manquants), facteur XI de départ (formation off/déf, titulaires habituels, buts/passes) avec auto-chargement à l'approche du coup d'envoi ; route lineup: remontée des erreurs API-Football (clé/quota/plan) pour diagnostic",
+    message: "feat: tableau final officiel FIFA 2026 (bracket fixe + vraies affiches/résultats via API), alias noms football-data (scores de groupe manquants), compositions par équipe (formation + XI éditable PRÉ-REMPLI d'un onze probable depuis l'effectif football-data, reporté d'un match à l'autre) pondérées par buts/passes ; pronostic 'sans compo' par défaut, mis à jour dès saisie",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];
