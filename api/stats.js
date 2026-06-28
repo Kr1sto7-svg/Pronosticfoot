@@ -168,15 +168,23 @@ export default async function handler(req, res) {
     const FORM_OFF = { "3-4-3": 1.12, "4-3-3": 1.08, "3-5-2": 1.05, "4-2-3-1": 1.05, "3-4-2-1": 1.05, "4-4-2": 1.00, "4-1-4-1": 0.98, "4-4-1-1": 0.97, "4-5-1": 0.93, "5-3-2": 0.92, "5-4-1": 0.88 };
     const season = req.query.season || "2026";
     const matchTeam = (apiName, q) => { const n = norm(apiName), nq = norm(q); return n.includes(nq) || nq.includes(n); };
+    // API-Football met les erreurs (clé invalide, quota, plan…) dans .errors :
+    // on les remonte telles quelles pour diagnostiquer au lieu d'un vague "introuvable".
+    const apiErr = (j) => { const e = j && j.errors; if (!e) return null; if (Array.isArray(e)) return e.length ? e.join(" · ") : null; const v = Object.values(e).filter(Boolean); return v.length ? v.join(" · ") : null; };
     try {
       const fr = await fetch("https://v3.football.api-sports.io/fixtures?league=1&season=" + season, { headers: AH });
       const fj = await fr.json();
-      const fx = (fj.response || []).find((x) => (matchTeam(x.teams.home.name, qh) && matchTeam(x.teams.away.name, qa)) || (matchTeam(x.teams.home.name, qa) && matchTeam(x.teams.away.name, qh)));
-      if (!fx) return res.status(200).json({ source, supported: true, found: false, note: "Match introuvable sur API-Football pour cette saison." });
+      const fErr = apiErr(fj);
+      if (fErr) return res.status(200).json({ source, supported: false, note: "API-Football : " + fErr });
+      if (!fj.response || !fj.response.length) return res.status(200).json({ source, supported: true, found: false, note: "Aucun match de la Coupe du Monde renvoyé par API-Football (league=1, season=" + season + "). Vérifie que ton plan couvre cette compétition." });
+      const fx = fj.response.find((x) => (matchTeam(x.teams.home.name, qh) && matchTeam(x.teams.away.name, qa)) || (matchTeam(x.teams.home.name, qa) && matchTeam(x.teams.away.name, qh)));
+      if (!fx) return res.status(200).json({ source, supported: true, found: false, note: "Match « " + qh + " – " + qa + " » non trouvé parmi les " + fj.response.length + " matchs WC d'API-Football (noms d'équipes ?)." });
       const lr = await fetch("https://v3.football.api-sports.io/fixtures/lineups?fixture=" + fx.fixture.id, { headers: AH });
       const lj = await lr.json();
+      const lErr = apiErr(lj);
+      if (lErr) return res.status(200).json({ source, supported: false, note: "API-Football (compos) : " + lErr });
       const lineups = lj.response || [];
-      if (!lineups.length) return res.status(200).json({ source, supported: true, found: true, ready: false, note: "Compositions pas encore publiées (≈1 h avant le coup d'envoi)." });
+      if (!lineups.length) return res.status(200).json({ source, supported: true, found: true, ready: false, note: "Compositions pas encore publiées par API-Football pour ce match (≈1 h avant le coup d'envoi)." });
       const playerStats = async (teamId) => {
         const out = {};
         for (const s of [season, String(Number(season) - 1)]) {
