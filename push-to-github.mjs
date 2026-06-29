@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "fix compos: effectifs réels football-data restaurés (correspondance noms robuste via fullName/shortName/alias -> fini 'effectif indisponible'), onze probable pré-rempli depuis l'effectif, éditeur poste(G/D/M/A)+nom éditable avec autocomplétion (ne bloque jamais) ; effets de formation à deux faces (FORM_PROFILE) et interaction des 2 équipes ; bracket officiel FIFA 2026",
+    message: "compos: badge de source par équipe (🔴 LIVE compo officielle API / ✅ effectif réel / ✏️ saisi / ⚠️ à compléter), bouton 🔄 pour recharger effectifs + tenter la compo live (route lineup), compo live auto-intégrée au pronostic si obtenue ; effectifs réels football-data (mapping robuste), éditeur poste+nom autocomplété, effets de formation à deux faces + interaction des 2 équipes",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

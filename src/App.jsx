@@ -553,7 +553,14 @@ function applyLineupF(team, f) {
  * titulaire a un POSTE choisi (G/D/M/A) et un NOM éditable (autocomplété par les
  * buteurs connus, gratuits). Le calcul n'a donc plus besoin de l'effectif. */
 const lastNm = (s) => { const t = (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").trim().split(/\s+/); return t[t.length - 1] || ""; };
+// Clé de cache d'une affiche (noms anglais), pour la compo live.
+const lineupKey = (aN, bN) => (NAT_EN[aN] || aN) + "|" + (NAT_EN[bN] || bN);
 const POS_LBL = { G: "G", D: "Déf", M: "Mil", A: "Att" };
+// Construit un objet "comp" (formation + XI) à partir d'une compo live de l'API.
+function liveToComp(side) {
+  if (!side) return null;
+  return { formation: side.formation || "", xi: (side.xi || []).map((p) => ({ name: p.name, pos: p.pos || "M" })) };
+}
 // Poste football-data (Goalkeeper/Defence/Midfield/Offence…) -> G/D/M/A.
 function posGroup(p) {
   const s = (p || "").toLowerCase();
@@ -1178,23 +1185,31 @@ function MatchScorers({ ta, tb, lh, la, absA, absB }) {
   );
 }
 /* Compositions : éditeur par équipe (reporté d'un match à l'autre, clé = nom).
- * Effectifs football-data étant payants, chaque titulaire = un POSTE (G/D/M/A,
- * cliquable) + un NOM éditable (autocomplété par les buteurs connus, gratuits).
- * La formation pose le gabarit des postes ; le nb d'attaquants et les buts/passes
- * ajustent le pronostic. Sans aucune saisie -> pronostic "sans compo". */
-function LineupPanel({ ta, tb, compA, compB, onCompChange, rosterA, rosterB }) {
+ * Chaque titulaire = un POSTE (G/D/M/A) + un NOM éditable (autocomplété par
+ * l'effectif réel football-data, gratuit). Un badge indique la SOURCE du XI :
+ *   🔴 LIVE = compo officielle obtenue via l'API (clé payante) ;
+ *   ✅ effectif réel = pré-rempli (onze probable) depuis l'effectif football-data ;
+ *   ✏️ saisi = modifié à la main ; ⚠️ à compléter = effectif non publié.
+ * Le bouton 🔄 recharge les effectifs et retente la compo live. */
+function LineupPanel({ ta, tb, compA, compB, onCompChange, rosterA, rosterB, liveA, liveB, luState, onRefresh }) {
   const [open, setOpen] = useState(false);
-  const Editor = ({ t, c, roster }) => {
+  const Editor = ({ t, c, roster, live }) => {
     const hasPos = (roster || []).some((p) => p.pos);
-    const seed = hasPos ? probableXI(roster, c && c.formation) : seedXI(c && c.formation, roster);
+    const liveComp = liveToComp(live);
+    const seed = liveComp ? liveComp.xi : (hasPos ? probableXI(roster, c && c.formation) : seedXI(c && c.formation, roster));
+    const edited = !!(c && (c.xi || c.formation || c.remanie));
     const xi = (c && c.xi) ? c.xi : seed;
+    const formation = (c && c.formation) || (liveComp && liveComp.formation) || "";
     const counts = { G: 0, D: 0, M: 0, A: 0 }; xi.forEach((p) => { counts[p.pos] = (counts[p.pos] || 0) + 1; });
     const setRow = (i, patch) => onCompChange(t.n, { xi: xi.map((p, k) => k === i ? { ...p, ...patch } : p) });
     const setFormation = (f) => { const tpl = posTemplate(f || "4-3-3"); onCompChange(t.n, { formation: f, xi: xi.map((p, i) => ({ name: p.name, pos: tpl[i] })) }); };
     const dlId = "dl-" + normName(t.n);
+    // Badge de source (priorité : saisie manuelle > live > effectif réel > rien).
+    const src = edited ? { c: "src-edit", t: "✏️ saisi" } : live ? { c: "src-live", t: "🔴 LIVE · compo officielle" } : hasPos ? { c: "src-real", t: "✅ effectif réel" } : { c: "src-none", t: "⚠️ à compléter" };
     return (
       <div className="wc-lu-col">
-        <div className="wc-lu-team">{t.f} {short(t.n)} <em>· {counts.D}-{counts.M}-{counts.A}</em></div>
+        <div className="wc-lu-team">{t.f} {short(t.n)} <em>· {formation || counts.D + "-" + counts.M + "-" + counts.A}</em></div>
+        <span className={"wc-lu-src " + src.c}>{src.t}</span>
         <select className="wc-lu-fsel" value={(c && c.formation) || ""} onChange={(e) => setFormation(e.target.value)}>
           {FORMATIONS.map((f) => <option key={f} value={f}>{f ? "Formation " + f : "Formation : libre"}</option>)}
         </select>
@@ -1213,20 +1228,25 @@ function LineupPanel({ ta, tb, compA, compB, onCompChange, rosterA, rosterB }) {
       </div>
     );
   };
+  const luSt = luState && luState.state;
   return (
     <div className="wc-sc-wrap">
-      <button className="wc-scbtn" onClick={() => setOpen(!open)}>🧩 Compositions (formation / XI) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
+      <div className="wc-lu-head">
+        <button className="wc-scbtn" onClick={() => setOpen(!open)}>🧩 Compositions (formation / XI) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
+        {open && <button className="wc-lu-refresh" onClick={() => onRefresh && onRefresh()} disabled={luSt === "loading"} title="Recharger les effectifs et tenter la compo officielle (live)">{luSt === "loading" ? "…" : "🔄"}</button>}
+      </div>
       {open && (
         <div className="wc-lu">
-          <Editor t={ta} c={compA} roster={rosterA} />
-          <Editor t={tb} c={compB} roster={rosterB} />
+          <Editor t={ta} c={compA} roster={rosterA} live={liveA} />
+          <Editor t={tb} c={compB} roster={rosterB} live={liveB} />
         </div>
       )}
-      {open && <div className="wc-sc-meta">XI pré-rempli depuis l'effectif réel — change un nom (autocomplété) ou un poste, et la formation. Le nb d'attaquants et les buts/passes des titulaires ajustent le pronostic. Saisie mémorisée et reprise au match suivant de l'équipe.</div>}
+      {open && luSt === "ok" && !(luState && luState.ready) && <div className="wc-sc-meta">Compo officielle (live) indisponible : {(luState && luState.note) || "non fournie par l'API gratuite"}.</div>}
+      {open && <div className="wc-sc-meta">XI pré-rempli depuis l'effectif réel (badge ✅) — modifie noms/postes/formation au besoin. 🔄 recharge les données et tente la compo officielle (badge 🔴 LIVE si une clé API payante la fournit). Saisie mémorisée et reprise au match suivant.</div>}
     </div>
   );
 }
-function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch, comp, onCompChange, rosterFor }) {
+function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, onClear, liveIds, matchMeta, absences, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
   const [open, setOpen] = useState(gi === 0);
   const table = groupTable(group, gi, results, eff);
   const situation = teamGroupSituation(group, gi, results);
@@ -1284,7 +1304,16 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
           // Rien saisi -> null -> le pronostic reste calculé "sans compo".
           const compA = comp ? comp[ta.n] : null, compB = comp ? comp[tb.n] : null;
           const rosA = rosterFor ? rosterFor(ta.n) : [], rosB = rosterFor ? rosterFor(tb.n) : [];
-          const fx = compFactor(compA, rosA), fy = compFactor(compB, rosB);
+          // Compo officielle LIVE si l'API l'a fournie (sinon null).
+          const luM = lineups ? lineups[lineupKey(ta.n, tb.n)] : null;
+          const luReady = luM && luM.state === "ok" && luM.ready;
+          const liveA = luReady ? luM.home : null, liveB = luReady ? luM.away : null;
+          // Priorité : saisie manuelle > compo live > rien (sans compo).
+          const hasManA = compA && (compA.xi || compA.formation || compA.remanie);
+          const hasManB = compB && (compB.xi || compB.formation || compB.remanie);
+          const effCompA = hasManA ? compA : liveToComp(liveA), effCompB = hasManB ? compB : liveToComp(liveB);
+          const fx = compFactor(effCompA, rosA), fy = compFactor(effCompB, rosB);
+          const liveUsed = (!hasManA && liveA) || (!hasManB && liveB);
           const p = !done ? predict(applyLineupF(applyRisk(eff[group[x]], rx), fx), applyLineupF(applyRisk(eff[group[y]], ry), fy), true, WC_AVG, LEAGUE_RHO.WC) : null;
           return (<div key={id} className="wc-m">
             {mm && <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(mm.dateIso)}</span><span className={"wc-mchan" + (mm.channel.startsWith("M6") ? " wc-mchan-tf1" : "")}>{mm.channel}</span></div>}
@@ -1303,9 +1332,9 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
               </span>
             </div>}
             {p && (rx > 0 || ry > 0) && <div className="wc-risk">⚡ {[rx > 0 ? short(ta.n) : null, ry > 0 ? short(tb.n) : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
-            {p && (fx || fy) && <div className="wc-lineup-badge">🧩 Composition saisie intégrée au pronostic</div>}
+            {p && (fx || fy) && <div className="wc-lineup-badge">{liveUsed ? "🔴 Compo officielle (live) intégrée au pronostic" : "🧩 Composition saisie intégrée au pronostic"}</div>}
             {p && <MatchScorers ta={ta} tb={tb} lh={p.lh} la={p.la} absA={absences ? absences[group[x]] : null} absB={absences ? absences[group[y]] : null} />}
-            {p && <LineupPanel ta={ta} tb={tb} compA={compA} compB={compB} onCompChange={onCompChange} rosterA={rosA} rosterB={rosB} />}
+            {p && <LineupPanel ta={ta} tb={tb} compA={compA} compB={compB} onCompChange={onCompChange} rosterA={rosA} rosterB={rosB} liveA={liveA} liveB={liveB} luState={luM} onRefresh={() => onRefresh && onRefresh(ta.n, tb.n)} />}
             <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(ta.n, tb.n, rx, ry)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>
           </div>);
         })}</div>
@@ -1313,7 +1342,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, rosterFor }) {
+function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
   if (tie.a == null && tie.b == null) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
@@ -1327,7 +1356,14 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, roster
   // Facteur composition saisie (par équipe), comme en phase de groupes.
   const compA = (comp && A) ? comp[A.n] : null, compB = (comp && B) ? comp[B.n] : null;
   const rosA = (rosterFor && A) ? rosterFor(A.n) : [], rosB = (rosterFor && B) ? rosterFor(B.n) : [];
-  const fa = compFactor(compA, rosA), fb = compFactor(compB, rosB);
+  const luM = (lineups && A && B) ? lineups[lineupKey(A.n, B.n)] : null;
+  const luReady = luM && luM.state === "ok" && luM.ready;
+  const liveA = luReady ? luM.home : null, liveB = luReady ? luM.away : null;
+  const hasManA = compA && (compA.xi || compA.formation || compA.remanie);
+  const hasManB = compB && (compB.xi || compB.formation || compB.remanie);
+  const effCompA = hasManA ? compA : liveToComp(liveA), effCompB = hasManB ? compB : liveToComp(liveB);
+  const fa = compFactor(effCompA, rosA), fb = compFactor(effCompB, rosB);
+  const liveUsed = (!hasManA && liveA) || (!hasManB && liveB);
   const teamA = applyLineupF((eff && tie.a != null) ? eff[tie.a] : A, fa);
   const teamB = applyLineupF((eff && tie.b != null) ? eff[tie.b] : B, fb);
   const p = (!tie.decided && teamA && teamB) ? predict(teamA, teamB, true, WC_AVG, LEAGUE_RHO.WC) : null;
@@ -1353,14 +1389,14 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, roster
           <b>2 · {pct(p.pA)}%</b><em>{p.topAway.s}</em>
         </span>
       </div>}
-      {p && (fa || fb) && <div className="wc-lineup-badge">🧩 Composition saisie intégrée au pronostic</div>}
-      {A && B && !tie.decided && <LineupPanel ta={A} tb={B} compA={compA} compB={compB} onCompChange={onCompChange} rosterA={rosA} rosterB={rosB} />}
+      {p && (fa || fb) && <div className="wc-lineup-badge">{liveUsed ? "🔴 Compo officielle (live) intégrée au pronostic" : "🧩 Composition saisie intégrée au pronostic"}</div>}
+      {A && B && !tie.decided && <LineupPanel ta={A} tb={B} compA={compA} compB={compB} onCompChange={onCompChange} rosterA={rosA} rosterB={rosB} liveA={liveA} liveB={liveB} luState={luM} onRefresh={() => onRefresh && onRefresh(A.n, B.n)} />}
       {A && B && <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(A.n, B.n)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
       <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.isReal ? "réel" : tie.decided ? "validé" : "projeté"}</span>
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onCompChange, rosterFor }) {
+function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1375,7 +1411,7 @@ function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onComp
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}</div></>}
     </div>
   );
 }
@@ -1456,7 +1492,9 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   // XI. Correspondance robuste (nom complet, court, alias) pour ne manquer aucune
   // équipe ; repli sur les buteurs seuls si un effectif n'est pas (encore) publié.
   const [roster, setRoster] = useState({}); // frName -> [{name,pos,goals,assists}]
-  useEffect(() => { (async () => {
+  const [rosterState, setRosterState] = useState("loading"); // loading | ok | err
+  const loadRoster = async () => {
+    setRosterState("loading");
     try {
       const [tr, sr] = await Promise.all([
         fetch("/api/stats?source=teams&league=WC"),
@@ -1480,10 +1518,27 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
         const fr = mapFr(p.team); if (!fr || (out[fr] && out[fr].length)) return;
         (out[fr] = out[fr] || []).push({ name: p.name, pos: "", goals: p.goals || 0, assists: p.assists || 0 });
       });
-      if (Object.keys(out).length) setRoster(out);
-    } catch {}
-  })(); }, []);
+      setRoster(out); setRosterState("ok");
+    } catch { setRosterState("err"); }
+  };
+  useEffect(() => { loadRoster(); }, []);
   const rosterFor = (frName) => roster[frName] || [];
+
+  // Compo OFFICIELLE LIVE (route lineup, API-Football) chargée à la demande via le
+  // bouton 🔄. En gratuit la saison 2026 est bloquée -> renvoie supported:false ;
+  // avec une clé payante, fournit la vraie formation + XI (badge LIVE).
+  const [lineups, setLineups] = useState({}); // lineupKey -> { state, ready, home, away, note }
+  const loadLineup = async (aN, bN) => {
+    const k = lineupKey(aN, bN);
+    setLineups((p) => ({ ...p, [k]: { state: "loading" } }));
+    try {
+      const qh = NAT_EN[aN] || aN, qa = NAT_EN[bN] || bN;
+      const r = await fetch("/api/stats?source=lineup&home=" + encodeURIComponent(qh) + "&away=" + encodeURIComponent(qa));
+      const d = await r.json();
+      setLineups((p) => ({ ...p, [k]: { state: "ok", ...d } }));
+    } catch { setLineups((p) => ({ ...p, [k]: { state: "err" } })); }
+  };
+  const onRefresh = (aN, bN) => { loadRoster(); loadLineup(aN, bN); };
 
   const apiParsed = useMemo(() => {
     const mapped = {}, meta = {};
@@ -1575,10 +1630,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
 
       {view === "groups" ? (<>
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
-        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} />)}
+        {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>) : (<>
         <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). Les vraies affiches et résultats sont repris dès qu'ils sont disponibles via l'API (étiquette « réel ») ; sinon le favori du modèle est affiché en « projeté ». <b>Touche une équipe</b> pour forcer une qualification (gère prolongation/tirs au but).</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} />)}
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>)}
     </>
   );
@@ -2258,6 +2313,15 @@ const CSS = `
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
 .wc-risk{font-size:10.5px;color:var(--amber);margin-top:6px;line-height:1.4;}
 .wc-lineup-badge{font-size:10.5px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:7px;padding:5px 9px;margin-top:6px;line-height:1.4;}
+.wc-lu-head{display:flex;align-items:center;gap:8px;}
+.wc-lu-head .wc-scbtn{flex:1;}
+.wc-lu-refresh{flex:none;background:#0e1116;border:1px solid var(--line);border-radius:7px;color:var(--cyan);font-size:13px;padding:3px 8px;cursor:pointer;}
+.wc-lu-refresh:disabled{opacity:.5;cursor:default;}
+.wc-lu-src{display:inline-block;align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:.02em;padding:2px 6px;border-radius:5px;margin:2px 0;}
+.src-live{background:rgba(255,90,90,.16);color:#ff7a7a;}
+.src-real{background:rgba(200,255,66,.14);color:var(--lime);}
+.src-edit{background:rgba(70,211,255,.14);color:var(--cyan);}
+.src-none{background:rgba(255,186,58,.14);color:var(--amber);}
 .wc-lu{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
 .wc-lu-col{background:#13161b;border:1px solid var(--line);border-radius:8px;padding:7px 8px;display:flex;flex-direction:column;gap:4px;min-width:0;}
 .wc-lu-team{font-size:11.5px;font-weight:700;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
