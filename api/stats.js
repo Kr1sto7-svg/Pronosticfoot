@@ -408,7 +408,8 @@ export default async function handler(req, res) {
       const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/teams", { headers: H });
       const j = await r.json();
       const teams = (j.teams || []).map((t) => ({
-        id: t.id, name: t.shortName || t.name, crest: t.crest,
+        // name = nom court (affichage) ; fullName = nom complet (meilleure correspondance FR).
+        id: t.id, name: t.shortName || t.name, fullName: t.name, shortName: t.shortName || "", crest: t.crest,
         squad: (t.squad || []).map((p) => ({ name: p.name, position: p.position || "", nationality: p.nationality || "", dob: p.dateOfBirth || "" })),
       }));
       return res.status(200).json({ source, league, count: teams.length, teams });

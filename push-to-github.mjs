@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "feat: calibrage des effets de formation à DEUX FACES (offensive = +buts/+encaissés, défensive = inverse) via FORM_PROFILE att/def ; interaction des formations des 2 équipes dans le match (2 blocs offensifs = match ouvert, 2 défensifs = fermé) ; éditeur compo clic-bouton + sélecteur de formation ; bracket officiel FIFA 2026",
+    message: "fix compos: effectifs réels football-data restaurés (correspondance noms robuste via fullName/shortName/alias -> fini 'effectif indisponible'), onze probable pré-rempli depuis l'effectif, éditeur poste(G/D/M/A)+nom éditable avec autocomplétion (ne bloque jamais) ; effets de formation à deux faces (FORM_PROFILE) et interaction des 2 équipes ; bracket officiel FIFA 2026",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];
