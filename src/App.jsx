@@ -1303,7 +1303,7 @@ function LineupPanel({ ta, tb, compA, compB, onCompChange, onCompReset, rosterA,
     <div className="wc-sc-wrap">
       <div className="wc-lu-head">
         <button className="wc-scbtn" onClick={() => setOpen(!open)}>🧩 Compositions (formation / XI) <ChevronDown size={13} className={open ? "pf-rot" : ""} /></button>
-        {open && <button className="wc-lu-refresh" onClick={() => onRefresh && onRefresh()} disabled={luSt === "loading"} title="Recharger les effectifs et tenter la compo officielle (live)">{luSt === "loading" ? "…" : "🔄"}</button>}
+        {open && <button className="wc-lu-refresh" onClick={() => onRefresh && onRefresh()} disabled={luSt === "loading"} title="Tenter la compo officielle (live, ~1h avant le coup d'envoi) et recharger les effectifs">{luSt === "loading" ? "… chargement" : "🔴 Compo live (API)"}</button>}
       </div>
       {open && (
         <div className="wc-lu">
@@ -2415,7 +2415,7 @@ const CSS = `
 .wc-lineup-badge{font-size:10.5px;color:var(--cyan);background:rgba(70,211,255,.1);border:1px solid rgba(70,211,255,.25);border-radius:7px;padding:5px 9px;margin-top:6px;line-height:1.4;}
 .wc-lu-head{display:flex;align-items:center;gap:8px;}
 .wc-lu-head .wc-scbtn{flex:1;}
-.wc-lu-refresh{flex:none;background:#0e1116;border:1px solid var(--line);border-radius:7px;color:var(--cyan);font-size:13px;padding:3px 8px;cursor:pointer;}
+.wc-lu-refresh{flex:none;background:#0e1116;border:1px solid var(--line);border-radius:7px;color:var(--cyan);font-size:11px;font-weight:600;white-space:nowrap;padding:4px 8px;cursor:pointer;}
 .wc-lu-refresh:disabled{opacity:.5;cursor:default;}
 .wc-lu-src{display:inline-block;align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:.02em;padding:2px 6px;border-radius:5px;margin:2px 0;}
 .src-live{background:rgba(255,90,90,.16);color:#ff7a7a;}
