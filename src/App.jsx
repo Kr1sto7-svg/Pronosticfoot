@@ -717,7 +717,7 @@ function realWinner(f) {
   if (f.hg != null && f.ag != null && f.hg !== f.ag) return f.hg > f.ag ? f.a : f.b;
   return null;
 }
-function buildKnockout(eff, tables, bestThirds, ko, results, koFixtures, leagueAvg = BASE_GOALS, rho = RHO) {
+function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO) {
   const real = koFixtures || { R32: [], R16: [], QF: [], SF: [], F: [] };
   // Groupes dont le 3e fait partie des 8 meilleurs (donc qualifié).
   const qualThirdGroups = tables
@@ -749,19 +749,30 @@ function buildKnockout(eff, tables, bestThirds, ko, results, koFixtures, leagueA
     for (let k = 0; k < count; k++) {
       const [a, b, rfPre] = ties[k] || [null, null, null];
       const id = name + "-" + k;
-      let prob = 0.5, winner = null, decided = false, kb = null, isReal = false;
+      let prob = 0.5, winner = null, decided = false, kb = null, isReal = false, score = null, scoreLive = false;
       if (a != null && b != null) {
         kb = predictKnockout(eff[a], eff[b], leagueAvg, rho);
         prob = kb.advA;
         // Affiche réelle de l'API pour ce tour (R32 via l'ancre, sinon par paire d'équipes).
         const rf = rfPre || (real[name] || []).find((x) => (x.a === a && x.b === b) || (x.a === b && x.b === a)) || null;
-        const manual = ko[id], sc = results[id], rw = realWinner(rf);
-        if (manual != null) { winner = manual; decided = true; }           // choix manuel (simulation) prioritaire
-        else if (rw != null) { winner = rw; decided = true; isReal = true; } // résultat réel de l'API
-        else if (sc && sc.hg != null && sc.ag != null && sc.hg !== sc.ag) { winner = sc.hg > sc.ag ? a : b; decided = true; }
-        else winner = prob >= 0.5 ? a : b;                                   // projection
+        const manual = ko[id];               // choix manuel du vainqueur (prol./t.a.b., simulation)
+        const ms = koScores[id];             // score saisi manuellement { hg, ag, ok }
+        const hasMs = ms && ms.hg != null && ms.ag != null;
+        // Score live de l'API, réorienté sur l'ordre a/b de cette affiche (rf peut être inversé).
+        const liveSc = (rf && rf.hg != null && rf.ag != null)
+          ? (rf.a === a ? { hg: rf.hg, ag: rf.ag } : { hg: rf.ag, ag: rf.hg })
+          : null;
+        const rw = realWinner(rf);
+        // Score affiché : saisi manuel prioritaire (comme en phase de groupes), sinon live API.
+        if (hasMs) score = { hg: ms.hg, ag: ms.ag, ok: ms.ok };
+        else if (liveSc) { score = liveSc; scoreLive = true; }
+        // Vainqueur : pick manuel > score saisi décisif > résultat réel API (prol./t.a.b.) > projection.
+        if (manual != null) { winner = manual; decided = true; }
+        else if (hasMs && ms.hg !== ms.ag) { winner = ms.hg > ms.ag ? a : b; decided = true; }
+        else if (rw != null) { winner = rw; decided = true; isReal = true; }
+        else winner = prob >= 0.5 ? a : b;
       } else winner = a != null ? a : b;
-      out.ties.push({ id, a, b, prob, winner, decided, kb, isReal });
+      out.ties.push({ id, a, b, prob, winner, decided, kb, isReal, score, scoreLive });
       winners.push(winner);
     }
     rounds.push(out);
@@ -1342,7 +1353,7 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
+function KnockoutTie({ tie, eff, onPick, onScore, onClearScore, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
   if (tie.a == null && tie.b == null) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
@@ -1377,6 +1388,11 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, roster
           <span className="wc-flag">{B ? B.f : "·"}</span><span className="wc-sn">{B ? short(B.n) : "—"}</span><span className="wc-sp">{B ? pb + "%" : ""}</span>
         </button>
       </div>
+      {A && B && onScore && <div className="wc-mline wc-tie-score">
+        <span className="wc-mt">{A.f} {short(A.n)}</span>
+        <MatchScoreBox id={tie.id} r={tie.score || {}} isLive={tie.scoreLive} onValidate={onScore} onClear={onClearScore} />
+        <span className="wc-mt wc-r">{short(B.n)} {B.f}</span>
+      </div>}
       {bd && !tie.decided && <div className="wc-kb">{short(bd.fav.n)} qualif. <b>{pct(bd.advP)}%</b> · 90′ {pct(bd.reg)}% · prol. {pct(bd.et)}% · t.a.b. {pct(bd.pen)}%</div>}
       {p && <div className="wc-pred">
         <span className={"wc-pc" + (p.pH >= p.pD && p.pH >= p.pA ? " wc-pc-top" : "")}>
@@ -1396,7 +1412,7 @@ function KnockoutTie({ tie, eff, onPick, onOpenMatch, comp, onCompChange, roster
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
+function RoundBlock({ round, eff, onPick, onScore, onClearScore, defaultOpen, onOpenMatch, comp, onCompChange, rosterFor, lineups, onRefresh }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1411,7 +1427,7 @@ function RoundBlock({ round, eff, onPick, defaultOpen, onOpenMatch, comp, onComp
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}</div></>}
     </div>
   );
 }
@@ -1433,18 +1449,21 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const [groups, setGroups] = useState(defaultGroups);
   const [results, setResults] = useState({});
   const [ko, setKo] = useState({});
+  // Scores saisis manuellement pour le tableau final (clé = id d'affiche, ex "R32-0").
+  const [koScores, setKoScores] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [rawApiMatches, setRawApiMatches] = useState([]);
   // Compositions saisies (PAR ÉQUIPE, reportées d'un match à l'autre), persistées :
   // { "France": { xi:[11 noms], remanie }, ... }.
   const [comp, setComp] = useState({});
   useEffect(() => { (async () => {
-    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3"), c = await store.get("wc:comp:v1");
-    if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); if (c) setComp(c); setLoaded(true);
+    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3"), c = await store.get("wc:comp:v1"), ks = await store.get("wc:koscores:v1");
+    if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); if (c) setComp(c); if (ks) setKoScores(ks); setLoaded(true);
   })(); }, []);
   useEffect(() => { if (loaded) store.set("wc:groups:v2", groups); }, [groups, loaded]);
   useEffect(() => { if (loaded) store.set("wc:results:v3", results); }, [results, loaded]);
   useEffect(() => { if (loaded) store.set("wc:ko:v3", ko); }, [ko, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:koscores:v1", koScores); }, [koScores, loaded]);
   useEffect(() => { if (loaded) store.set("wc:comp:v1", comp); }, [comp, loaded]);
   const onCompChange = (teamName, patch) => setComp((p) => ({ ...p, [teamName]: { ...(p[teamName] || {}), ...patch } }));
   useEffect(() => {
@@ -1604,10 +1623,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    const rounds = buildKnockout(eff, tables, bestThirds, ko, effectiveResults, koFixtures, WC_AVG, LEAGUE_RHO.WC);
+    const rounds = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, effectiveResults, ko, adjPool, absences, koFixtures]);
+  }, [groups, effectiveResults, ko, koScores, adjPool, absences, koFixtures]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   // Validation explicite : le score n'est sauvegardé et pris en compte dans les
@@ -1615,7 +1634,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const onValidate = (id, hg, ag) => setResults((p) => ({ ...p, [id]: { hg, ag, ok: 1 } }));
   const onClear = (id) => setResults((p) => { const n = { ...p }; delete n[id]; return n; });
   const onPick = (id, ti) => setKo((p) => { const n = { ...p }; if (n[id] === ti) delete n[id]; else n[id] = ti; return n; });
-  const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setGroups(defaultGroups()); } };
+  // Score d'affiche du tableau final : même logique de validation explicite que les groupes.
+  const onScore = (id, hg, ag) => setKoScores((p) => ({ ...p, [id]: { hg, ag, ok: 1 } }));
+  const onClearScore = (id) => setKoScores((p) => { const n = { ...p }; delete n[id]; return n; });
+  const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setKoScores({}); setGroups(defaultGroups()); } };
 
   const champ = wc.champion != null ? POOL[wc.champion] : null;
   return (
@@ -1632,8 +1654,8 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
         <div className="wc-hint">Saisis les scores réels au fil du tournoi puis <b>valide avec ✓</b> : le score est sauvegardé et les classements, qualifications et probabilités se recalculent. Touche le crayon pour corriger un score validé. <b>Groupes pré-remplis et éditables</b> — ajuste-les au tirage officiel.</div>
         {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>) : (<>
-        <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). Les vraies affiches et résultats sont repris dès qu'ils sont disponibles via l'API (étiquette « réel ») ; sinon le favori du modèle est affiché en « projeté ». <b>Touche une équipe</b> pour forcer une qualification (gère prolongation/tirs au but).</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
+        <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). <b>Saisis le score</b> de chaque affiche puis <b>valide avec ✓</b> (les scores live de l'API sont pré-remplis avec l'étiquette « live ») : le vainqueur et la suite du tableau se recalculent. En cas de match nul (prolongation/t.a.b.), <b>touche l'équipe qualifiée</b> pour la désigner.</div>
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>)}
     </>
   );
@@ -2371,6 +2393,9 @@ const CSS = `
 .wc-ties{padding:6px 13px 14px;display:flex;flex-direction:column;gap:8px;}
 .wc-tie{position:relative;display:flex;flex-direction:column;gap:6px;}
 .wc-tie-sides{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.wc-tie-score{justify-content:center;padding:2px 0;}
+.wc-tie-score .wc-mt{flex:0 1 auto;max-width:42%;text-align:right;}
+.wc-tie-score .wc-mt.wc-r{text-align:left;}
 .wc-kb{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);text-align:center;}
 .wc-kb b{color:var(--cyan);}
 .wc-side{display:flex;align-items:center;gap:7px;background:#0e1116;border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer;color:var(--txt);text-align:left;}
