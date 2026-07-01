@@ -699,25 +699,32 @@ function compFactor(comp, scorers) {
  *   ["3",[groupes autorisés]] = un 3e parmi ces groupes (table FIFA des 3es).
  * R32_SLOTS est rangé dans l'ordre "feuilles" du tableau : la mise en paire
  * séquentielle (ties[2k], ties[2k+1]) reproduit alors automatiquement
- * R16 -> Finale dans le bon ordre (matchs 89-102). */
+ * R16 -> quarts -> demies -> finale dans le bon ordre (matchs 89-104).
+ * Ordre officiel des feuilles (par n° de match) :
+ *   [73,75] [74,77] | [76,78] [79,80] || [84,87] [81,82] | [86,88] [83,85]
+ * -> R16 : (73,75)(74,77)(76,78)(79,80)(84,87)(81,82)(86,88)(83,85)
+ * -> quarts : (73,75)+(74,77) · (76,78)+(79,80) · (84,87)+(81,82) · (86,88)+(83,85)
+ * -> demies : les 4 premières places d'un côté, les 4 dernières de l'autre.
+ * (Ex. réel 2026 : Espagne/Autriche affronte Portugal/Croatie en 8e (84,87), et
+ *  le vainqueur d'USA/Bosnie–Belgique/Sénégal (81,82) les retrouve en quart.) */
 const gIdx = (L) => LETTERS.indexOf(L);
 const R32_SLOTS = [
-  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },
-  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },
   { m: 73, a: ["R", "A"], b: ["R", "B"] },
   { m: 75, a: ["W", "F"], b: ["R", "C"] },
-  { m: 83, a: ["R", "K"], b: ["R", "L"] },
-  { m: 84, a: ["W", "H"], b: ["R", "J"] },
-  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },
-  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },
+  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },
+  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },
   { m: 76, a: ["W", "C"], b: ["R", "F"] },
   { m: 78, a: ["R", "E"], b: ["R", "I"] },
   { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },
   { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },
+  { m: 84, a: ["W", "H"], b: ["R", "J"] },
+  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },
+  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },
+  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },
   { m: 86, a: ["W", "J"], b: ["R", "H"] },
   { m: 88, a: ["R", "D"], b: ["R", "G"] },
+  { m: 83, a: ["R", "K"], b: ["R", "L"] },
   { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },
-  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },
 ];
 /* Attribue les 8 meilleurs 3es aux 8 places "3e" en respectant les groupes
  * autorisés par la FIFA pour chacune (matching exact par backtracking : une
@@ -1670,8 +1677,8 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const apiParsed = useMemo(() => {
     const mapped = {}, meta = {};
     for (const m of rawApiMatches) {
-      const hFr = EN_TO_FR_NORM[normName(m.home)];
-      const aFr = EN_TO_FR_NORM[normName(m.away)];
+      const hFr = frTeamNorm(m.home);
+      const aFr = frTeamNorm(m.away);
       if (!hFr || !aFr) continue;
       const hIdx = POOL.findIndex((t) => t.n === hFr);
       const aIdx = POOL.findIndex((t) => t.n === aFr);
@@ -1705,7 +1712,7 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     for (const m of rawApiMatches) {
       const round = stageToRound(m.stage);
       if (!round || round === "group") continue;
-      const hFr = EN_TO_FR_NORM[normName(m.home)], aFr = EN_TO_FR_NORM[normName(m.away)];
+      const hFr = frTeamNorm(m.home), aFr = frTeamNorm(m.away);
       if (!hFr || !aFr) continue;
       const a = POOL.findIndex((t) => t.n === hFr), b = POOL.findIndex((t) => t.n === aFr);
       if (a < 0 || b < 0) continue;
@@ -2015,7 +2022,14 @@ const NAT_EN_ALIASES = {
   "United States": "États-Unis",
   "DR Congo": "RD Congo", "Congo DR": "RD Congo",
   "Cabo Verde": "Cap-Vert",
+  // Bosnie : chaque source l'écrit différemment. On couvre toutes les graphies
+  // (avec/sans « and », trait d'union, forme abrégée, nom natif) sinon les 3 matchs
+  // de groupe de la Bosnie ne se rattachent pas -> pas de 3e du groupe B -> l'affiche
+  // US–Bosnie disparaît du tableau final.
   "Bosnia and Herzegovina": "Bosnie-Herzégovine", "Bosnia & Herzegovina": "Bosnie-Herzégovine",
+  "Bosnia-Herzegovina": "Bosnie-Herzégovine", "Bosnia Herzegovina": "Bosnie-Herzégovine",
+  "Bosnia": "Bosnie-Herzégovine", "Bosnia and Herz.": "Bosnie-Herzégovine",
+  "Bosna i Hercegovina": "Bosnie-Herzégovine",
   "Côte d'Ivoire": "Côte d'Ivoire", "Ivory Coast": "Côte d'Ivoire",
   "IR Iran": "Iran",
   "Türkiye": "Turquie", "Turkey": "Turquie",
@@ -2028,6 +2042,22 @@ const EN_TO_FR_NORM = (() => {
   Object.entries(NAT_EN_ALIASES).forEach(([en, fr]) => { m[normName(en)] = fr; });
   return m;
 })();
+/* Résout un nom d'équipe renvoyé par une API vers le nom FR du POOL, en tolérant
+ * les variantes d'écriture d'une source à l'autre. Correspondance exacte d'abord,
+ * puis repli par préfixe commun (garde-fou : clé >= 5 lettres pour éviter les faux
+ * positifs). Sans ce repli, une simple différence d'orthographe (ex. la Bosnie)
+ * fait disparaître silencieusement tous les matchs de l'équipe concernée. */
+const frTeamNorm = (raw) => {
+  const k = normName(raw);
+  if (!k) return null;
+  if (EN_TO_FR_NORM[k]) return EN_TO_FR_NORM[k];
+  let best = null;
+  for (const key in EN_TO_FR_NORM) {
+    if (key.length < 5 || k.length < 5) continue;
+    if ((k.startsWith(key) || key.startsWith(k)) && (!best || key.length > best.length)) best = key;
+  }
+  return best ? EN_TO_FR_NORM[best] : null;
+};
 
 // Ajuste att/def/elo du pool avec classement FIFA + résultats internationaux récents.
 function adjustPoolWithIntl(intlMatches, basePool = POOL) {
