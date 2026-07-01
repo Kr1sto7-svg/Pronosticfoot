@@ -767,13 +767,31 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
   // R32 : la place "a" est toujours un vainqueur/2e (jamais un 3e) -> ancre fiable.
   // Si l'API fournit la vraie affiche contenant cette ancre, on l'utilise telle quelle
   // (cela fixe notamment le 3e adverse exactement comme dans le tirage officiel).
+  // Chaque affiche réelle n'est consommée qu'une fois (sinon deux places partageant
+  // la même ancre - cas d'un classement calculé encore incertain - piocheraient la
+  // même affiche et dupliqueraient une équipe).
+  const usedR32 = new Set();      // indices d'affiches réelles déjà attribuées
+  const placedReal = new Set();   // équipes déjà fixées par une affiche réelle
   let ties = R32_SLOTS.map((s) => {
     const anchor = resolveSide(s.a, s.m);
-    const projB = resolveSide(s.b, s.m);
-    const f = anchor != null ? real.R32.find((x) => x.a === anchor || x.b === anchor) : null;
-    if (f) return [anchor, f.a === anchor ? f.b : f.a, f];
-    return [anchor, projB, null];
+    let fi = -1;
+    if (anchor != null) fi = real.R32.findIndex((x, i) => !usedR32.has(i) && (x.a === anchor || x.b === anchor));
+    if (fi >= 0) {
+      const f = real.R32[fi]; usedR32.add(fi);
+      const opp = f.a === anchor ? f.b : f.a;
+      placedReal.add(anchor); placedReal.add(opp);
+      return [anchor, opp, f];
+    }
+    return [anchor, resolveSide(s.b, s.m), null];
   });
+  // Une place projetée qui réutilise une équipe déjà fixée par une affiche réelle est
+  // périmée (la projection de groupe diverge du tirage réel) : on l'efface (affichée
+  // « à venir ») plutôt que de faire apparaître la même équipe deux fois.
+  for (const t of ties) {
+    if (t[2]) continue;                                  // affiche réelle : intacte
+    if (t[0] != null && placedReal.has(t[0])) t[0] = null;
+    if (t[1] != null && placedReal.has(t[1])) t[1] = null;
+  }
   const defs = [["R32", 16], ["R16", 8], ["QF", 4], ["SF", 2], ["F", 1]];
   const rounds = [];
   for (const [name, count] of defs) {
