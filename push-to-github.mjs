@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "compos: badge de source par équipe (🔴 LIVE compo officielle API / ✅ effectif réel / ✏️ saisi / ⚠️ à compléter), bouton 🔄 pour recharger effectifs + tenter la compo live (route lineup), compo live auto-intégrée au pronostic si obtenue ; effectifs réels football-data (mapping robuste), éditeur poste+nom autocomplété, effets de formation à deux faces + interaction des 2 équipes",
+    message: "tableau final: corrige l'ordre du bracket sur la structure officielle FIFA 2026 (8es -> quarts -> demies entrelacées : France en haut, Brésil en bas -> possible seulement en finale) ; plus de doublon d'équipe (Sénégal) ni d'affiche réelle perdue (US-Bosnie) — chaque affiche API consommée une fois puis dédoublonnée ; résolveur de noms tolérant (frTeamNorm) pour rattacher les résultats de groupe même en cas de graphie différente entre sources (ex. Bosnie)",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

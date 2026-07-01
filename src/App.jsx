@@ -700,31 +700,35 @@ function compFactor(comp, scorers) {
  * R32_SLOTS est rangé dans l'ordre "feuilles" du tableau : la mise en paire
  * séquentielle (ties[2k], ties[2k+1]) reproduit alors automatiquement
  * R16 -> quarts -> demies -> finale dans le bon ordre (matchs 89-104).
- * Ordre officiel des feuilles (par n° de match) :
- *   [73,75] [74,77] | [76,78] [79,80] || [84,87] [81,82] | [86,88] [83,85]
- * -> R16 : (73,75)(74,77)(76,78)(79,80)(84,87)(81,82)(86,88)(83,85)
- * -> quarts : (73,75)+(74,77) · (76,78)+(79,80) · (84,87)+(81,82) · (86,88)+(83,85)
- * -> demies : les 4 premières places d'un côté, les 4 dernières de l'autre.
- * (Ex. réel 2026 : Espagne/Autriche affronte Portugal/Croatie en 8e (84,87), et
- *  le vainqueur d'USA/Bosnie–Belgique/Sénégal (81,82) les retrouve en quart.) */
+ * La numérotation FIFA des 8es est chronologique (89-90 = 4 juil., 91-92 = 5 juil.,
+ * 93-94 = 6 juil., 95-96 = 7 juil.) et les quarts s'enchaînent en ENTRELACÉ :
+ *   QF97 = M89+M90 · QF98 = M93+M94 · QF99 = M91+M92 · QF100 = M95+M96
+ *   demie 101 = QF97+QF98 · demie 102 = QF99+QF100.
+ * Ordre des feuilles reproduisant ce tableau (par n° de match R32) :
+ *   moitié haute (demie 101) : [73,75][74,77] + [84,87][81,82]
+ *   moitié basse (demie 102) : [76,78][79,80] + [86,88][83,85]
+ * Conséquence (réel 2026) : la France (1I, place 77) est en HAUT, le Brésil (1C,
+ * place 76) en BAS -> ils ne peuvent se croiser qu'en finale. */
 const gIdx = (L) => LETTERS.indexOf(L);
 const R32_SLOTS = [
-  { m: 73, a: ["R", "A"], b: ["R", "B"] },
-  { m: 75, a: ["W", "F"], b: ["R", "C"] },
-  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },
-  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },
-  { m: 76, a: ["W", "C"], b: ["R", "F"] },
-  { m: 78, a: ["R", "E"], b: ["R", "I"] },
-  { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },
-  { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },
-  { m: 84, a: ["W", "H"], b: ["R", "J"] },
-  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },
-  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },
-  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },
-  { m: 86, a: ["W", "J"], b: ["R", "H"] },
-  { m: 88, a: ["R", "D"], b: ["R", "G"] },
-  { m: 83, a: ["R", "K"], b: ["R", "L"] },
-  { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },
+  // ── Moitié haute (demi-finale 101) ──
+  { m: 73, a: ["R", "A"], b: ["R", "B"] },                          // Canada/2A
+  { m: 75, a: ["W", "F"], b: ["R", "C"] },                          //   – Maroc/Pays-Bas
+  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },    // Paraguay
+  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },    //   – France
+  { m: 84, a: ["W", "H"], b: ["R", "J"] },                          // Espagne/Autriche
+  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },    //   – Portugal/Croatie
+  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },    // USA/Bosnie
+  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },    //   – Belgique/Sénégal
+  // ── Moitié basse (demi-finale 102) ──
+  { m: 76, a: ["W", "C"], b: ["R", "F"] },                          // Brésil
+  { m: 78, a: ["R", "E"], b: ["R", "I"] },                          //   – Norvège
+  { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },    // Mexique
+  { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },    //   – Angleterre/RDC
+  { m: 86, a: ["W", "J"], b: ["R", "H"] },                          // Argentine
+  { m: 88, a: ["R", "D"], b: ["R", "G"] },                          //   – Australie/Égypte
+  { m: 83, a: ["R", "K"], b: ["R", "L"] },                          // Colombie/Ghana
+  { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },    //   – Suisse/Algérie
 ];
 /* Attribue les 8 meilleurs 3es aux 8 places "3e" en respectant les groupes
  * autorisés par la FIFA pour chacune (matching exact par backtracking : une
