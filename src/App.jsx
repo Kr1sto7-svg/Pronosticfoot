@@ -784,6 +784,22 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
     }
     return [anchor, resolveSide(s.b, s.m), null];
   });
+  // Toute vraie affiche R32 encore non rattachée (son ancre projetée ne correspondait
+  // à aucune place - typiquement un classement de groupe pas encore figé, ex. le
+  // vainqueur du groupe D calculé n'est pas encore les États-Unis) DOIT quand même
+  // apparaître : sinon l'affiche réelle (US–Bosnie…) est purement perdue. On la place
+  // dans une place non fixée, en priorité celle qui référence déjà une de ses équipes.
+  for (let i = 0; i < real.R32.length; i++) {
+    if (usedR32.has(i)) continue;
+    const f = real.R32[i];
+    let idx = ties.findIndex((t) => !t[2] && (t[0] === f.a || t[0] === f.b || t[1] === f.a || t[1] === f.b));
+    if (idx < 0) idx = ties.findIndex((t) => !t[2] && t[0] == null && t[1] == null);
+    if (idx < 0) idx = ties.findIndex((t) => !t[2]);
+    if (idx < 0) break;                                  // plus aucune place libre
+    usedR32.add(i);
+    placedReal.add(f.a); placedReal.add(f.b);
+    ties[idx] = [f.a, f.b, f];
+  }
   // Une place projetée qui réutilise une équipe déjà fixée par une affiche réelle est
   // périmée (la projection de groupe diverge du tirage réel) : on l'efface (affichée
   // « à venir ») plutôt que de faire apparaître la même équipe deux fois.
