@@ -97,7 +97,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "tableau final: corrige l'ordre du bracket sur la structure officielle FIFA 2026 (8es -> quarts -> demies entrelacées : France en haut, Brésil en bas -> possible seulement en finale) ; plus de doublon d'équipe (Sénégal) ni d'affiche réelle perdue (US-Bosnie) — chaque affiche API consommée une fois puis dédoublonnée ; résolveur de noms tolérant (frTeamNorm) pour rattacher les résultats de groupe même en cas de graphie différente entre sources (ex. Bosnie)",
+    message: "tableau final: API prioritaire sur TOUS les tours du bracket (attachRealToRound) — les affiches réelles 8es->finale (ex. Portugal-Espagne) sont recalées sur les bonnes places même si la projection amont diverge, au lieu d'être perdues ; mode édition (bouton 'Corriger les affiches' + menus déroulants) pour reattribuer manuellement une équipe sans toucher au modèle (pronostic recalculé sur la paire validée) ; bandeau de contrôle API (nb d'affiches par tour + alerte des noms non mappés)",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

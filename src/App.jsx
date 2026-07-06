@@ -760,6 +760,46 @@ function realWinner(f) {
   if (f.hg != null && f.ag != null && f.hg !== f.ag) return f.hg > f.ag ? f.a : f.b;
   return null;
 }
+/* Force les affiches RÉELLES de l'API dans un tour (R16→Finale) sur les bonnes
+ * places, même quand la projection (vainqueurs du tour précédent) diverge du
+ * tirage réel. Sans ça, une affiche réelle (ex. Espagne–Portugal en 8es) n'était
+ * retenue QUE si la paire projetée correspondait exactement -> elle disparaissait
+ * à la moindre erreur d'attribution en amont. On associe chaque affiche réelle à
+ * la place qui partage le plus d'équipes avec elle (2 = exacte, 1 = partielle),
+ * puis on remplit les places encore vides ; l'affiche réelle prime sur la projection.
+ * Retourne des triplets [a, b, fixtureRéelle|null] prêts pour la boucle du bracket. */
+function attachRealToRound(pairs, reals) {
+  const out = pairs.map((p) => [p && p[0] != null ? p[0] : null, p && p[1] != null ? p[1] : null, null]);
+  if (!reals || !reals.length) return out;
+  const overlap = (slot, f) => (slot[0] != null && (slot[0] === f.a || slot[0] === f.b) ? 1 : 0) + (slot[1] != null && (slot[1] === f.a || slot[1] === f.b) ? 1 : 0);
+  const cand = [];
+  reals.forEach((f, fi) => out.forEach((slot, k) => cand.push({ fi, k, s: overlap(slot, f) })));
+  cand.sort((x, y) => y.s - x.s);
+  const usedF = new Set(), usedK = new Set(), placed = new Set();
+  for (const c of cand) {
+    if (usedF.has(c.fi) || usedK.has(c.k)) continue;
+    const slot = out[c.k], f = reals[c.fi];
+    const slotEmpty = slot[0] == null && slot[1] == null;
+    if (c.s === 0 && !slotEmpty) continue;   // ne pas écraser une place projetée cohérente avec une affiche sans lien
+    out[c.k] = [f.a, f.b, f];
+    usedF.add(c.fi); usedK.add(c.k); placed.add(f.a); placed.add(f.b);
+  }
+  // Affiches réelles encore non placées (aucun recoupement) : place vide en priorité, sinon toute place non réelle.
+  reals.forEach((f, fi) => {
+    if (usedF.has(fi)) return;
+    let k = out.findIndex((s, i) => !usedK.has(i) && s[0] == null && s[1] == null);
+    if (k < 0) k = out.findIndex((s, i) => !usedK.has(i) && s[2] == null);
+    if (k < 0) return;
+    out[k] = [f.a, f.b, f]; usedK.add(k); placed.add(f.a); placed.add(f.b);
+  });
+  // Une équipe fixée par une affiche réelle ne doit pas rester en doublon sur une place projetée.
+  for (const slot of out) {
+    if (slot[2]) continue;
+    if (slot[0] != null && placed.has(slot[0])) slot[0] = null;
+    if (slot[1] != null && placed.has(slot[1])) slot[1] = null;
+  }
+  return out;
+}
 function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO, koTeams = {}) {
   const real = koFixtures || { R32: [], R16: [], QF: [], SF: [], F: [] };
   // Groupes dont le 3e fait partie des 8 meilleurs (donc qualifié).
@@ -822,6 +862,11 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
   const defs = [["R32", 16], ["R16", 8], ["QF", 4], ["SF", 2], ["F", 1]];
   const rounds = [];
   for (const [name, count] of defs) {
+    // R16→Finale : on rend l'API prioritaire en plaçant ses affiches réelles sur
+    // les bonnes places (R32 est déjà géré par l'ancre au-dessus). Les vainqueurs
+    // réels du tour précédent ont déjà alimenté `ties`, mais si la projection a
+    // divergé, cette étape recale l'affiche exacte du tirage/de la feuille de match.
+    if (name !== "R32") ties = attachRealToRound(ties, real[name]);
     const out = { name, ties: [] }, winners = [];
     for (let k = 0; k < count; k++) {
       let [a, b, rfPre] = ties[k] || [null, null, null];
@@ -1758,6 +1803,25 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     return out;
   }, [rawApiMatches]);
 
+  // Contrôle API du tableau final : combien d'affiches knockout l'API renvoie par
+  // tour, et lesquelles n'ont pas pu être rattachées (noms d'équipes non mappés) —
+  // c'est la cause typique d'une affiche manquante/mal attribuée.
+  const koApiSummary = useMemo(() => {
+    const counts = { R32: 0, R16: 0, QF: 0, SF: 0, F: 0 };
+    const unmapped = [];
+    let any = false;
+    for (const m of rawApiMatches) {
+      const round = stageToRound(m.stage);
+      if (!round || round === "group") continue;
+      any = true;
+      const hFr = frTeamNorm(m.home), aFr = frTeamNorm(m.away);
+      const a = hFr ? POOL.findIndex((t) => t.n === hFr) : -1, b = aFr ? POOL.findIndex((t) => t.n === aFr) : -1;
+      if (a >= 0 && b >= 0) counts[round]++;
+      else unmapped.push({ round, home: m.home, away: m.away });
+    }
+    return { any, counts, unmapped };
+  }, [rawApiMatches]);
+
   // NB : pas d'auto-chargement des compos. Le XI confirmé du Mondial 2026 n'est
   // sur AUCUNE API gratuite (football-data = pack payant ; API-Football gratuit
   // = saison 2026 bloquée). On s'appuie donc sur la saisie manuelle (par défaut le
@@ -1821,6 +1885,13 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
         {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>) : (<>
         <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). <b>Saisis le score</b> de chaque affiche puis <b>valide avec ✓</b> (les scores live de l'API sont pré-remplis avec l'étiquette « live ») : le vainqueur et la suite du tableau se recalculent. En cas de match nul (prolongation/t.a.b.), <b>touche l'équipe qualifiée</b> pour la désigner.</div>
+        <div className={"wc-apisync " + (koApiSummary.any ? (koApiSummary.unmapped.length ? "warn" : "ok") : "off")}>
+          <Radio size={13} />
+          {koApiSummary.any ? (<>
+            <span>Affiches API : {["R32", "R16", "QF", "SF", "F"].filter((r) => koApiSummary.counts[r]).map((r) => ({ R32: "16es", R16: "8es", QF: "quarts", SF: "demies", F: "finale" }[r] + " " + koApiSummary.counts[r])).join(" · ") || "aucune mappée"}</span>
+            {koApiSummary.unmapped.length > 0 && <span className="wc-apisync-warn">⚠ {koApiSummary.unmapped.length} affiche(s) non reconnue(s) : {koApiSummary.unmapped.slice(0, 3).map((u) => u.home + "–" + u.away).join(", ")}{koApiSummary.unmapped.length > 3 ? "…" : ""} — à corriger à la main.</span>}
+          </>) : <span>Aucune affiche de phase finale renvoyée par l'API pour l'instant (tirage/matchs pas encore publiés). Le tableau reste projeté.</span>}
+        </div>
         <button className={"wc-editbtn" + (editBracket ? " on" : "")} onClick={() => setEditBracket((v) => !v)}>
           <Pencil size={15} /> {editBracket ? "Terminer l'édition" : "Corriger les affiches"}
         </button>
@@ -2615,6 +2686,11 @@ const CSS = `
 .wc-tie-auto{display:flex;align-items:center;gap:4px;background:#1b1f25;border:1px solid var(--line);color:var(--dim);border-radius:9px;padding:6px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
 .wc-tie-edited{outline:1px dashed rgba(240,165,0,.5);outline-offset:3px;border-radius:8px;}
 .wc-tie-empty{padding:2px 0;}
+.wc-apisync{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11.5px;line-height:1.45;border-radius:10px;padding:8px 10px;margin-bottom:8px;border:1px solid var(--line);}
+.wc-apisync.ok{color:var(--cyan);background:rgba(70,211,255,.08);border-color:rgba(70,211,255,.3);}
+.wc-apisync.warn{color:#ffcf8f;background:rgba(240,165,0,.08);border-color:rgba(240,165,0,.35);}
+.wc-apisync.off{color:var(--dim);background:#141821;}
+.wc-apisync-warn{flex-basis:100%;color:#ffcf8f;}
 /* live */
 .lv-ctrl{display:flex;gap:8px;margin-bottom:8px;}
 .lv-ctrl select{flex:1;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:11px;font-size:13px;}
