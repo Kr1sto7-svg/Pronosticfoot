@@ -760,7 +760,7 @@ function realWinner(f) {
   if (f.hg != null && f.ag != null && f.hg !== f.ag) return f.hg > f.ag ? f.a : f.b;
   return null;
 }
-function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO) {
+function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO, koTeams = {}) {
   const real = koFixtures || { R32: [], R16: [], QF: [], SF: [], F: [] };
   // Groupes dont le 3e fait partie des 8 meilleurs (donc qualifié).
   const qualThirdGroups = tables
@@ -824,8 +824,16 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
   for (const [name, count] of defs) {
     const out = { name, ties: [] }, winners = [];
     for (let k = 0; k < count; k++) {
-      const [a, b, rfPre] = ties[k] || [null, null, null];
+      let [a, b, rfPre] = ties[k] || [null, null, null];
       const id = name + "-" + k;
+      // Correction manuelle de l'affiche : l'utilisateur force l'une/les deux équipes
+      // (menu déroulant du mode édition). L'affiche réelle projetée est écartée ; les
+      // pronostics et le vainqueur se recalculent ensuite sur les équipes validées.
+      const ov = koTeams[id];
+      if (ov) {
+        if (ov.a != null) { a = ov.a; rfPre = null; }
+        if (ov.b != null) { b = ov.b; rfPre = null; }
+      }
       let prob = 0.5, winner = null, decided = false, kb = null, isReal = false, score = null, scoreLive = false;
       if (a != null && b != null) {
         kb = predictKnockout(eff[a], eff[b], leagueAvg, rho);
@@ -849,7 +857,7 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
         else if (rw != null) { winner = rw; decided = true; isReal = true; }
         else winner = prob >= 0.5 ? a : b;
       } else winner = a != null ? a : b;
-      out.ties.push({ id, a, b, prob, winner, decided, kb, isReal, score, scoreLive });
+      out.ties.push({ id, a, b, prob, winner, decided, kb, isReal, score, scoreLive, edited: !!ov });
       winners.push(winner);
     }
     rounds.push(out);
@@ -1459,9 +1467,27 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
     </div>
   );
 }
-function KnockoutTie({ tie, eff, onPick, onScore, onClearScore, onOpenMatch, comp, onCompChange, onCompReset, rosterFor, lineups, onRefresh }) {
-  if (tie.a == null && tie.b == null) return null;
+function KnockoutTie({ tie, eff, onPick, onScore, onClearScore, onOpenMatch, comp, onCompChange, onCompReset, rosterFor, lineups, onRefresh, editBracket, onKoTeam, onKoTeamReset }) {
+  if (tie.a == null && tie.b == null && !editBracket) return null;
   const A = tie.a != null ? POOL[tie.a] : null, B = tie.b != null ? POOL[tie.b] : null;
+  // Éditeur d'affiche : deux menus déroulants (toutes les nations qualifiées) pour
+  // corriger l'équipe côté a/b. Le pronostic reste calculé par le modèle sur la paire choisie.
+  const editor = editBracket && onKoTeam ? (
+    <div className="wc-tie-edit">
+      <div className="wc-tie-edit-row">
+        <select className="wc-tie-sel" value={tie.a ?? ""} onChange={(e) => onKoTeam(tie.id, "a", e.target.value === "" ? null : Number(e.target.value))}>
+          <option value="">— équipe A —</option>
+          {POOL.map((tm, i) => <option key={i} value={i}>{tm.f} {tm.n}</option>)}
+        </select>
+        <select className="wc-tie-sel" value={tie.b ?? ""} onChange={(e) => onKoTeam(tie.id, "b", e.target.value === "" ? null : Number(e.target.value))}>
+          <option value="">— équipe B —</option>
+          {POOL.map((tm, i) => <option key={i} value={i}>{tm.f} {tm.n}</option>)}
+        </select>
+      </div>
+      {tie.edited && <button className="wc-tie-auto" onClick={() => onKoTeamReset(tie.id)}><RotateCcw size={12} /> Auto</button>}
+    </div>
+  ) : null;
+  if (tie.a == null && tie.b == null) return <div className="wc-tie wc-tie-empty">{editor}</div>;
   const pa = Math.round(tie.prob * 100), pb = 100 - pa;
   const sel = (ti) => tie.winner === ti;
   const kb = tie.kb;
@@ -1491,7 +1517,8 @@ function KnockoutTie({ tie, eff, onPick, onScore, onClearScore, onOpenMatch, com
   const formB = (eff && tie.b != null && eff[tie.b]) ? eff[tie.b].form : null;
   const p = (!tie.decided && teamA && teamB) ? predict(teamA, teamB, true, WC_AVG, LEAGUE_RHO.WC) : null;
   return (
-    <div className="wc-tie">
+    <div className={"wc-tie" + (tie.edited ? " wc-tie-edited" : "")}>
+      {editor}
       <div className="wc-tie-sides">
         <button className={"wc-side " + (sel(tie.a) ? "wc-win" : "") + (tie.decided && !sel(tie.a) ? " wc-out" : "")} onClick={() => A && onPick(tie.id, tie.a)} disabled={!A}>
           <span className="wc-flag">{A ? A.f : "·"}</span><span className="wc-sn">{A ? short(A.n) : "—"}</span><span className="wc-sp">{A ? pa + "%" : ""}</span>
@@ -1524,11 +1551,11 @@ function KnockoutTie({ tie, eff, onPick, onScore, onClearScore, onOpenMatch, com
       {p && (fa || fb) && <div className="wc-lineup-badge">{liveUsed ? "🔴 Compo officielle (live) intégrée au pronostic" : defaultUsed ? "📋 Formation par défaut intégrée au pronostic — ajustable ci-dessous" : "🧩 Composition saisie intégrée au pronostic"}</div>}
       {A && B && !tie.decided && <LineupPanel ta={A} tb={B} compA={compA} compB={compB} onCompChange={onCompChange} onCompReset={onCompReset} rosterA={rosA} rosterB={rosB} liveA={liveA} liveB={liveB} luState={luM} onRefresh={() => onRefresh && onRefresh(A.n, B.n)} defFormA={defaultFormation(A)} defFormB={defaultFormation(B)} />}
       {A && B && <button className="wc-detailsbtn" onClick={() => onOpenMatch && onOpenMatch(A.n, B.n)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
-      <span className={"wc-tag " + (tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.isReal ? "réel" : tie.decided ? "validé" : "projeté"}</span>
+      <span className={"wc-tag " + (tie.edited ? "wc-tag-edit" : tie.decided ? "wc-tag-real" : "wc-tag-proj")}>{tie.edited ? "corrigé" : tie.isReal ? "réel" : tie.decided ? "validé" : "projeté"}</span>
     </div>
   );
 }
-function RoundBlock({ round, eff, onPick, onScore, onClearScore, defaultOpen, onOpenMatch, comp, onCompChange, onCompReset, rosterFor, lineups, onRefresh }) {
+function RoundBlock({ round, eff, onPick, onScore, onClearScore, defaultOpen, onOpenMatch, comp, onCompChange, onCompReset, rosterFor, lineups, onRefresh, editBracket, onKoTeam, onKoTeamReset }) {
   const [open, setOpen] = useState(defaultOpen);
   const names = { R32: "16es de finale (Round of 32)", R16: "8es de finale", QF: "Quarts de finale", SF: "Demi-finales", F: "Finale" };
   /* Dates officielles FIFA + diffusion France : beIN diffuse tout ;
@@ -1543,7 +1570,7 @@ function RoundBlock({ round, eff, onPick, onScore, onClearScore, defaultOpen, on
   return (
     <div className="pf-card wc-round">
       <button className="wc-group-head" onClick={() => setOpen(!open)}><span className="wc-glabel">{names[round.name]}</span><ChevronDown size={16} className={open ? "pf-rot" : ""} /></button>
-      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}</div></>}
+      {open && <><div className="wc-kinfo">{infos[round.name]}</div><div className="wc-ties">{round.ties.map((t) => <KnockoutTie key={t.id} tie={t} eff={eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} editBracket={editBracket} onKoTeam={onKoTeam} onKoTeamReset={onKoTeamReset} />)}</div></>}
     </div>
   );
 }
@@ -1567,19 +1594,25 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   const [ko, setKo] = useState({});
   // Scores saisis manuellement pour le tableau final (clé = id d'affiche, ex "R32-0").
   const [koScores, setKoScores] = useState({});
+  // Corrections manuelles d'affiches du tableau final (clé = id, ex "R32-0") :
+  // { a: idxPOOL, b: idxPOOL } force l'une/les deux équipes en cas d'erreur
+  // d'attribution. Les pronostics se recalculent sur les équipes ainsi validées.
+  const [koTeams, setKoTeams] = useState({});
+  const [editBracket, setEditBracket] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [rawApiMatches, setRawApiMatches] = useState([]);
   // Compositions saisies (PAR ÉQUIPE, reportées d'un match à l'autre), persistées :
   // { "France": { xi:[11 noms], remanie }, ... }.
   const [comp, setComp] = useState({});
   useEffect(() => { (async () => {
-    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3"), c = await store.get("wc:comp:v1"), ks = await store.get("wc:koscores:v1");
-    if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); if (c) setComp(c); if (ks) setKoScores(ks); setLoaded(true);
+    const g = await store.get("wc:groups:v2"), r = await store.get("wc:results:v3"), k = await store.get("wc:ko:v3"), c = await store.get("wc:comp:v1"), ks = await store.get("wc:koscores:v1"), kt = await store.get("wc:koteams:v1");
+    if (g && g.length === 12) setGroups(g); if (r) setResults(r); if (k) setKo(k); if (c) setComp(c); if (ks) setKoScores(ks); if (kt) setKoTeams(kt); setLoaded(true);
   })(); }, []);
   useEffect(() => { if (loaded) store.set("wc:groups:v2", groups); }, [groups, loaded]);
   useEffect(() => { if (loaded) store.set("wc:results:v3", results); }, [results, loaded]);
   useEffect(() => { if (loaded) store.set("wc:ko:v3", ko); }, [ko, loaded]);
   useEffect(() => { if (loaded) store.set("wc:koscores:v1", koScores); }, [koScores, loaded]);
+  useEffect(() => { if (loaded) store.set("wc:koteams:v1", koTeams); }, [koTeams, loaded]);
   useEffect(() => { if (loaded) store.set("wc:comp:v1", comp); }, [comp, loaded]);
   const onCompChange = (teamName, patch) => setComp((p) => ({ ...p, [teamName]: { ...(p[teamName] || {}), ...patch } }));
   // Annule toutes les modifications de compo d'une équipe : on supprime sa saisie
@@ -1746,10 +1779,10 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    const rounds = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC);
+    const rounds = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
     const champion = rounds[4].ties[0].winner;
     return { eff, bestThirds, rounds, champion };
-  }, [groups, effectiveResults, ko, koScores, adjPool, absences, koFixtures, matchMeta]);
+  }, [groups, effectiveResults, ko, koScores, koTeams, adjPool, absences, koFixtures, matchMeta]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   // Validation explicite : le score n'est sauvegardé et pris en compte dans les
@@ -1760,7 +1793,17 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
   // Score d'affiche du tableau final : même logique de validation explicite que les groupes.
   const onScore = (id, hg, ag) => setKoScores((p) => ({ ...p, [id]: { hg, ag, ok: 1 } }));
   const onClearScore = (id) => setKoScores((p) => { const n = { ...p }; delete n[id]; return n; });
-  const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setKoScores({}); setGroups(defaultGroups()); } };
+  // Correction manuelle d'une affiche : force l'équipe côté "a" ou "b". Un score déjà
+  // saisi / un vainqueur pointé pour cette affiche est effacé (il portait sur l'ancienne
+  // paire) ; les pronostics se recalculent sur la nouvelle paire validée.
+  const onKoTeam = (id, side, val) => {
+    setKoTeams((p) => ({ ...p, [id]: { ...(p[id] || {}), [side]: val } }));
+    setKoScores((p) => { const n = { ...p }; delete n[id]; return n; });
+    setKo((p) => { const n = { ...p }; delete n[id]; return n; });
+  };
+  // Rétablit l'attribution automatique (officielle/live) d'une affiche corrigée.
+  const onKoTeamReset = (id) => setKoTeams((p) => { const n = { ...p }; delete n[id]; return n; });
+  const reset = () => { if (confirm("Effacer tous les scores et rétablir les groupes par défaut ?")) { setResults({}); setKo({}); setKoScores({}); setKoTeams({}); setGroups(defaultGroups()); } };
 
   const champ = wc.champion != null ? POOL[wc.champion] : null;
   return (
@@ -1778,7 +1821,11 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
         {groups.map((g, gi) => <GroupCard key={gi} gi={gi} group={g} results={effectiveResults} eff={wc.eff} bestThirds={wc.bestThirds} onTeam={onTeam} onValidate={onValidate} onClear={onClear} liveIds={liveIds} matchMeta={matchMeta} absences={absences} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
       </>) : (<>
         <div className="wc-hint"><b>Tableau final officiel FIFA 2026</b> (positions de groupe fixes + attribution des 8 meilleurs 3es). <b>Saisis le score</b> de chaque affiche puis <b>valide avec ✓</b> (les scores live de l'API sont pré-remplis avec l'étiquette « live ») : le vainqueur et la suite du tableau se recalculent. En cas de match nul (prolongation/t.a.b.), <b>touche l'équipe qualifiée</b> pour la désigner.</div>
-        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} />)}
+        <button className={"wc-editbtn" + (editBracket ? " on" : "")} onClick={() => setEditBracket((v) => !v)}>
+          <Pencil size={15} /> {editBracket ? "Terminer l'édition" : "Corriger les affiches"}
+        </button>
+        {editBracket && <div className="wc-hint wc-edit-hint">Choisis la bonne équipe dans le menu déroulant si une affiche est mal attribuée. La correction ne touche pas au modèle : les pronostics sont recalculés entre les deux équipes que tu valides. Touche <b>↺ Auto</b> pour rétablir l'attribution officielle/live.</div>}
+        {wc.rounds.map((r, i) => <RoundBlock key={r.name} round={r} eff={wc.eff} onPick={onPick} onScore={onScore} onClearScore={onClearScore} defaultOpen={i === 0} onOpenMatch={onOpenMatch} comp={comp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} lineups={lineups} onRefresh={onRefresh} editBracket={editBracket} onKoTeam={onKoTeam} onKoTeamReset={onKoTeamReset} />)}
       </>)}
     </>
   );
@@ -2557,6 +2604,17 @@ const CSS = `
 .wc-tag{position:absolute;top:-7px;right:8px;font-size:9px;font-family:'Saira Condensed';font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:5px;}
 .wc-tag-real{background:var(--cyan);color:#0b0d10;}
 .wc-tag-proj{background:#1b1f25;color:var(--dim);border:1px solid var(--line);}
+.wc-tag-edit{background:#f0a500;color:#0b0d10;}
+/* édition d'affiches du tableau final */
+.wc-editbtn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;}
+.wc-editbtn.on{background:rgba(240,165,0,.14);border-color:#f0a500;color:#f0a500;}
+.wc-edit-hint{border-left:2px solid #f0a500;}
+.wc-tie-edit{display:flex;align-items:center;gap:6px;}
+.wc-tie-edit-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1;}
+.wc-tie-sel{background:#0e1116;border:1px solid #f0a500;border-radius:9px;color:var(--txt);padding:8px;font-size:12px;min-width:0;}
+.wc-tie-auto{display:flex;align-items:center;gap:4px;background:#1b1f25;border:1px solid var(--line);color:var(--dim);border-radius:9px;padding:6px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
+.wc-tie-edited{outline:1px dashed rgba(240,165,0,.5);outline-offset:3px;border-radius:8px;}
+.wc-tie-empty{padding:2px 0;}
 /* live */
 .lv-ctrl{display:flex;gap:8px;margin-bottom:8px;}
 .lv-ctrl select{flex:1;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:11px;font-size:13px;}
