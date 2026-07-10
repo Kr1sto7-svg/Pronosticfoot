@@ -447,18 +447,20 @@ function tournamentStats(groups, results) {
   }));
   return st;
 }
+// Mise à jour Elo d'un match : ti/tj = indices POOL, sa = score de ti (1/0.5/0).
+function applyEloResult(elo, ti, tj, sa, K = 30) {
+  const ea = 1 / (1 + Math.pow(10, (elo[tj] - elo[ti]) / 400));
+  elo[ti] += K * (sa - ea);
+  elo[tj] += K * ((1 - sa) - (1 - ea));
+}
 function eloAfterGroups(groups, results) {
   const elo = POOL.map(t => t.elo);
-  const K = 30;
   groups.forEach((g, gi) => {
     groupPairs(gi).forEach(([x, y]) => {
       const r = results["G" + LETTERS[gi] + "-" + x + "-" + y];
       if (!r || r.hg == null || r.ag == null) return;
-      const ti = g[x], tj = g[y];
       const sa = r.hg > r.ag ? 1 : r.hg === r.ag ? 0.5 : 0;
-      const ea = 1 / (1 + Math.pow(10, (elo[tj] - elo[ti]) / 400));
-      elo[ti] += K * (sa - ea);
-      elo[tj] += K * ((1 - sa) - (1 - ea));
+      applyEloResult(elo, g[x], g[y], sa, 30);
     });
   });
   return elo;
@@ -480,6 +482,23 @@ function formAfterGroups(groups, results, dateOf) {
     ev[tj].push({ t, r: r.ag > r.hg ? "W" : r.hg === r.ag ? "D" : "L" });
   }));
   return ev.map((list) => list.sort((a, b) => a.t - b.t).map((e) => e.r));
+}
+/* Résultats RÉELS du tableau final (R32→SF) extraits d'un bracket déjà construit,
+ * en ordre chronologique de tour. On ne retient que les affiches TERMINÉES avec un
+ * score (tie.decided + tie.score) — une simple projection/pick sans score ne compte
+ * pas. Sert à réinjecter les matchs à élimination directe dans les forces (Elo /
+ * att-déf / forme) pour les tours suivants, comme la phase de groupes. */
+function knockoutOutcomes(rounds) {
+  const out = [];
+  for (const round of rounds) {                 // rounds déjà ordonnés R32→Finale
+    for (const tie of round.ties) {
+      if (tie.a == null || tie.b == null || !tie.decided) continue;
+      const s = tie.score;
+      if (!s || s.hg == null || s.ag == null) continue; // score en orientation a/b
+      out.push({ a: tie.a, b: tie.b, hg: s.hg, ag: s.ag });
+    }
+  }
+  return out;
 }
 function effectivePool(stats, eloArr, basePool = POOL) {
   return basePool.map((t, i) => {
@@ -1838,14 +1857,37 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     // Forme du tournoi (V/N/D chronologique) injectée dans les forces : le momentum
     // des matchs de groupe (live + manuels) alimente ainsi les pronostics knockout.
     const formArr = formAfterGroups(groups, effectiveResults, (id) => matchMeta[id] && matchMeta[id].dateIso);
-    const eff = applyAbsences(effectivePool(stats, eloArr, adjPool), absences)
-      .map((t, i) => formArr[i].length ? { ...t, form: formArr[i] } : t);
+    const mkEff = (st, elo, fArr) => applyAbsences(effectivePool(st, elo, adjPool), absences)
+      .map((t, i) => fArr[i].length ? { ...t, form: fArr[i] } : t);
+    const eff = mkEff(stats, eloArr, formArr);
+    // Le classement des groupes et les 8 meilleurs 3es se figent sur la phase de
+    // groupes uniquement (l'Elo post-KO ne doit pas réordonner un groupe déjà joué).
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
-    const rounds = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
-    const champion = rounds[4].ties[0].winner;
-    return { eff, bestThirds, rounds, champion };
+    // 1er passage : bracket avec les forces de groupe -> révèle les affiches jouées.
+    const rounds0 = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
+    // Réinjection des matchs à élimination directe TERMINÉS dans les forces : Elo
+    // (K=40, matchs à enjeu), buts (att/déf observées) et forme (momentum V/N/D).
+    // Ainsi un tour prédit tient compte de TOUS les résultats précédents du Mondial.
+    const koRes = knockoutOutcomes(rounds0);
+    if (!koRes.length) return { eff, bestThirds, rounds: rounds0, champion: rounds0[4].ties[0].winner };
+    const elo2 = eloArr.slice();
+    const stats2 = stats.map((s) => ({ ...s }));
+    const koForm = POOL.map(() => []);
+    for (const o of koRes) {
+      const sa = o.hg > o.ag ? 1 : o.hg === o.ag ? 0.5 : 0;
+      applyEloResult(elo2, o.a, o.b, sa, 40);
+      stats2[o.a].gf += o.hg; stats2[o.a].ga += o.ag; stats2[o.a].gp++;
+      stats2[o.b].gf += o.ag; stats2[o.b].ga += o.hg; stats2[o.b].gp++;
+      koForm[o.a].push(o.hg > o.ag ? "W" : o.hg === o.ag ? "D" : "L");
+      koForm[o.b].push(o.ag > o.hg ? "W" : o.hg === o.ag ? "D" : "L");
+    }
+    const formArr2 = formArr.map((f, i) => f.concat(koForm[i]).slice(-5)); // 5 plus récents, chronologiques
+    const eff2 = mkEff(stats2, elo2, formArr2);
+    // 2e passage : mêmes têtes de série (tables/bestThirds figées), forces à jour.
+    const rounds = buildKnockout(eff2, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
+    return { eff: eff2, bestThirds, rounds, champion: rounds[4].ties[0].winner };
   }, [groups, effectiveResults, ko, koScores, koTeams, adjPool, absences, koFixtures, matchMeta]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
