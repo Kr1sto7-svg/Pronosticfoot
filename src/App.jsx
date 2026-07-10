@@ -820,7 +820,7 @@ function attachRealToRound(pairs, reals) {
   }
   return out;
 }
-function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO, koTeams = {}) {
+function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, leagueAvg = BASE_GOALS, rho = RHO, koTeams = {}, lineupFor = null) {
   const real = koFixtures || { R32: [], R16: [], QF: [], SF: [], F: [] };
   // Groupes dont le 3e fait partie des 8 meilleurs (donc qualifié).
   const qualThirdGroups = tables
@@ -901,7 +901,10 @@ function buildKnockout(eff, tables, bestThirds, ko, koScores = {}, koFixtures, l
       }
       let prob = 0.5, winner = null, decided = false, kb = null, isReal = false, score = null, scoreLive = false;
       if (a != null && b != null) {
-        kb = predictKnockout(eff[a], eff[b], leagueAvg, rho);
+        // Facteur compo (formation/XI) intégré au % de qualification, avec les mêmes
+        // priorités que les cartes de match (saisie > compo live > formation par défaut).
+        const [lfA, lfB] = lineupFor ? lineupFor(a, b) : [null, null];
+        kb = predictKnockout(applyLineupF(eff[a], lfA), applyLineupF(eff[b], lfB), leagueAvg, rho);
         prob = kb.advA;
         // Affiche réelle de l'API pour ce tour (R32 via l'ancre, sinon par paire d'équipes).
         const rf = rfPre || (real[name] || []).find((x) => (x.a === a && x.b === b) || (x.a === b && x.b === a)) || null;
@@ -1861,13 +1864,25 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     const mkEff = (st, elo, fArr) => applyAbsences(effectivePool(st, elo, adjPool), absences)
       .map((t, i) => fArr[i].length ? { ...t, form: fArr[i] } : t);
     const eff = mkEff(stats, eloArr, formArr);
+    // Facteurs compo par affiche pour les % de qualification du bracket — mêmes
+    // priorités que les cartes de match (saisie manuelle > compo live > défaut).
+    const lineupFor = (a, b) => {
+      const A = POOL[a], B = POOL[b];
+      const luM = lineups[lineupKey(A.n, B.n)];
+      const luReady = luM && luM.state === "ok" && luM.ready;
+      const one = (t, c, live) => {
+        const man = c && (c.xi || c.formation || c.remanie);
+        return compFactor(man ? c : (liveToComp(live) || defaultComp(t)), roster[t.n] || []);
+      };
+      return [one(A, comp[A.n], luReady ? luM.home : null), one(B, comp[B.n], luReady ? luM.away : null)];
+    };
     // Le classement des groupes et les 8 meilleurs 3es se figent sur la phase de
     // groupes uniquement (l'Elo post-KO ne doit pas réordonner un groupe déjà joué).
     const tables = groups.map((g, gi) => groupTable(g, gi, effectiveResults, eff));
     const thirds = tables.map((t, gi) => ({ ...t[2], gi })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || eff[b.ti].elo - eff[a.ti].elo);
     const bestThirds = new Set(thirds.slice(0, 8).map((t) => t.ti));
     // 1er passage : bracket avec les forces de groupe -> révèle les affiches jouées.
-    const rounds0 = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
+    const rounds0 = buildKnockout(eff, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams, lineupFor);
     // Réinjection des matchs à élimination directe TERMINÉS dans les forces : Elo
     // (K=40, matchs à enjeu), buts (att/déf observées) et forme (momentum V/N/D).
     // Ainsi un tour prédit tient compte de TOUS les résultats précédents du Mondial.
@@ -1887,9 +1902,9 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
     const formArr2 = formArr.map((f, i) => f.concat(koForm[i]).slice(-5)); // 5 plus récents, chronologiques
     const eff2 = mkEff(stats2, elo2, formArr2);
     // 2e passage : mêmes têtes de série (tables/bestThirds figées), forces à jour.
-    const rounds = buildKnockout(eff2, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams);
+    const rounds = buildKnockout(eff2, tables, bestThirds, ko, koScores, koFixtures, WC_AVG, LEAGUE_RHO.WC, koTeams, lineupFor);
     return { eff: eff2, bestThirds, rounds, champion: rounds[4].ties[0].winner };
-  }, [groups, effectiveResults, ko, koScores, koTeams, adjPool, absences, koFixtures, matchMeta]);
+  }, [groups, effectiveResults, ko, koScores, koTeams, adjPool, absences, koFixtures, matchMeta, comp, roster, lineups]);
 
   const onTeam = (gi, s, val) => setGroups((p) => { const n = p.map((g) => [...g]); n[gi][s] = val; return n; });
   // Validation explicite : le score n'est sauvegardé et pris en compte dans les
