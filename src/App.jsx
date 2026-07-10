@@ -719,35 +719,36 @@ function compFactor(comp, scorers) {
  * R32_SLOTS est rangé dans l'ordre "feuilles" du tableau : la mise en paire
  * séquentielle (ties[2k], ties[2k+1]) reproduit alors automatiquement
  * R16 -> quarts -> demies -> finale dans le bon ordre (matchs 89-104).
- * La numérotation FIFA des 8es est chronologique (89-90 = 4 juil., 91-92 = 5 juil.,
- * 93-94 = 6 juil., 95-96 = 7 juil.) et les quarts s'enchaînent en ENTRELACÉ :
- *   QF97 = M89+M90 · QF98 = M93+M94 · QF99 = M91+M92 · QF100 = M95+M96
- *   demie 101 = QF97+QF98 · demie 102 = QF99+QF100.
+ * Arbre VÉRIFIÉ sur le bracket réel 2026 (8es effectivement jouées) :
+ *   8es : M89 = W74+W77 · M90 = W73+W75 · M93 = W83+W84 · M94 = W81+W82
+ *         M91 = W76+W78 · M92 = W79+W80 · M95 = W86+W88 · M96 = W85+W87
+ *   quarts ENTRELACÉS : QF97 = M89+M90 · QF98 = M93+M94 · QF99 = M91+M92 ·
+ *   QF100 = M95+M96 · demie 101 = QF97+QF98 · demie 102 = QF99+QF100.
  * Ordre des feuilles reproduisant ce tableau (par n° de match R32) :
- *   moitié haute (demie 101) : [73,75][74,77] + [84,87][81,82]
- *   moitié basse (demie 102) : [76,78][79,80] + [86,88][83,85]
+ *   moitié haute (demie 101) : [74,77][73,75] + [83,84][81,82]
+ *   moitié basse (demie 102) : [76,78][79,80] + [86,88][85,87]
  * Conséquence (réel 2026) : la France (1I, place 77) est en HAUT, le Brésil (1C,
  * place 76) en BAS -> ils ne peuvent se croiser qu'en finale. */
 const gIdx = (L) => LETTERS.indexOf(L);
 const R32_SLOTS = [
   // ── Moitié haute (demi-finale 101) ──
-  { m: 73, a: ["R", "A"], b: ["R", "B"] },                          // Canada/2A
-  { m: 75, a: ["W", "F"], b: ["R", "C"] },                          //   – Maroc/Pays-Bas
-  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },    // Paraguay
-  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },    //   – France
-  { m: 84, a: ["W", "H"], b: ["R", "J"] },                          // Espagne/Autriche
-  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },    //   – Portugal/Croatie
-  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },    // USA/Bosnie
-  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },    //   – Belgique/Sénégal
+  { m: 74, a: ["W", "E"], b: ["3", ["A", "B", "C", "D", "F"]] },    // Allemagne–Paraguay
+  { m: 77, a: ["W", "I"], b: ["3", ["C", "D", "F", "G", "H"]] },    //   – France–Suède
+  { m: 73, a: ["R", "A"], b: ["R", "B"] },                          // Afrique du Sud–Canada
+  { m: 75, a: ["W", "F"], b: ["R", "C"] },                          //   – Pays-Bas–Maroc
+  { m: 83, a: ["R", "K"], b: ["R", "L"] },                          // Portugal–Croatie
+  { m: 84, a: ["W", "H"], b: ["R", "J"] },                          //   – Espagne–Autriche
+  { m: 81, a: ["W", "D"], b: ["3", ["B", "E", "F", "I", "J"]] },    // USA–Bosnie
+  { m: 82, a: ["W", "G"], b: ["3", ["A", "E", "H", "I", "J"]] },    //   – Belgique–Sénégal
   // ── Moitié basse (demi-finale 102) ──
-  { m: 76, a: ["W", "C"], b: ["R", "F"] },                          // Brésil
-  { m: 78, a: ["R", "E"], b: ["R", "I"] },                          //   – Norvège
-  { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },    // Mexique
-  { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },    //   – Angleterre/RDC
-  { m: 86, a: ["W", "J"], b: ["R", "H"] },                          // Argentine
-  { m: 88, a: ["R", "D"], b: ["R", "G"] },                          //   – Australie/Égypte
-  { m: 83, a: ["R", "K"], b: ["R", "L"] },                          // Colombie/Ghana
-  { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },    //   – Suisse/Algérie
+  { m: 76, a: ["W", "C"], b: ["R", "F"] },                          // Brésil–Japon
+  { m: 78, a: ["R", "E"], b: ["R", "I"] },                          //   – Côte d'Ivoire–Norvège
+  { m: 79, a: ["W", "A"], b: ["3", ["C", "E", "F", "H", "I"]] },    // Mexique–Équateur
+  { m: 80, a: ["W", "L"], b: ["3", ["E", "H", "I", "J", "K"]] },    //   – Angleterre–RDC
+  { m: 86, a: ["W", "J"], b: ["R", "H"] },                          // Argentine–Cap-Vert
+  { m: 88, a: ["R", "D"], b: ["R", "G"] },                          //   – Australie–Égypte
+  { m: 85, a: ["W", "B"], b: ["3", ["E", "F", "G", "I", "J"]] },    // Suisse–Algérie
+  { m: 87, a: ["W", "K"], b: ["3", ["D", "E", "I", "J", "L"]] },    //   – Colombie–Ghana
 ];
 /* Attribue les 8 meilleurs 3es aux 8 places "3e" en respectant les groupes
  * autorisés par la FIFA pour chacune (matching exact par backtracking : une
