@@ -77,6 +77,17 @@ async function main() {
     const commit = await api("GET", `/repos/${OWNER}/${REPO}/git/commits/${parentSha}`);
     baseTreeSha = commit.tree.sha;
     console.log(`    Branche : ${branch} — commit parent : ${parentSha.slice(0, 7)}\n`);
+    // Sauvegarde de l'ancienne version AVANT d'écraser main : on crée UNE SEULE
+    // fois la branche BACKUP_BRANCH qui pointe sur le commit actuel de main.
+    // Idempotent : si la branche existe déjà, on n'y touche pas (relançable sans risque).
+    const backup = process.env.BACKUP_BRANCH || "v4-mondial";
+    try {
+      await api("GET", `/repos/${OWNER}/${REPO}/git/refs/heads/${backup}`);
+      console.log(`🗄️  Branche de sauvegarde '${backup}' déjà présente — on la conserve.\n`);
+    } catch {
+      await api("POST", `/repos/${OWNER}/${REPO}/git/refs`, { ref: `refs/heads/${backup}`, sha: head.sha });
+      console.log(`🗄️  Ancienne version sauvegardée sur la branche '${backup}' (commit ${head.sha.slice(0, 7)}).\n`);
+    }
   } else {
     console.log("    Dépôt vide — premier commit.\n");
   }
@@ -97,7 +108,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "tableau final: API prioritaire sur TOUS les tours du bracket (attachRealToRound) — les affiches réelles 8es->finale (ex. Portugal-Espagne) sont recalées sur les bonnes places même si la projection amont diverge, au lieu d'être perdues ; mode édition (bouton 'Corriger les affiches' + menus déroulants) pour reattribuer manuellement une équipe sans toucher au modèle (pronostic recalculé sur la paire validée) ; bandeau de contrôle API (nb d'affiches par tour + alerte des noms non mappés)",
+    message: "Réorientation post-Mondial : onglet National (championnats) devient l'onglet principal et par défaut, Mondial 26 passe en dernier. Onglet National enrichi — Ligue 1 par défaut, tableau des JOURNÉES à venir groupées par matchday avec pronostic 1/N/2 par affiche, panneau composition/formation par match (compo live API + dernière compo connue par défaut, comme le Mondial), Lyon mis en avant. API 'lineup' étendue aux 5 grands championnats + Primeira/Eredivisie/LDC (LG_AF). Ancienne version conservée sur la branche v4-mondial.",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

@@ -166,19 +166,33 @@ export default async function handler(req, res) {
     const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
     // Indice offensif des formations courantes (1 = neutre, >1 offensive, <1 défensive).
     const FORM_OFF = { "3-4-3": 1.12, "4-3-3": 1.08, "3-5-2": 1.05, "4-2-3-1": 1.05, "3-4-2-1": 1.05, "4-4-2": 1.00, "4-1-4-1": 0.98, "4-4-1-1": 0.97, "4-5-1": 0.93, "5-3-2": 0.92, "5-4-1": 0.88 };
-    const season = req.query.season || "2026";
+    // Correspondance code compétition -> id + saison API-Football. La Coupe du Monde
+    // (league=1, saison 2026) et les 5 grands championnats de clubs (saison 2025-26).
+    const LG_AF = {
+      WC: { id: 1, season: "2026" }, FL1: { id: 61, season: "2025" }, PL: { id: 39, season: "2025" },
+      PD: { id: 140, season: "2025" }, BL1: { id: 78, season: "2025" }, SA: { id: 135, season: "2025" },
+      PPL: { id: 94, season: "2025" }, DED: { id: 88, season: "2025" }, CL: { id: 2, season: "2025" },
+    };
+    const lg = LG_AF[req.query.league || "WC"] || LG_AF.WC;
+    const season = req.query.season || lg.season;
     const matchTeam = (apiName, q) => { const n = norm(apiName), nq = norm(q); return n.includes(nq) || nq.includes(n); };
     // API-Football met les erreurs (clé invalide, quota, plan…) dans .errors :
     // on les remonte telles quelles pour diagnostiquer au lieu d'un vague "introuvable".
     const apiErr = (j) => { const e = j && j.errors; if (!e) return null; if (Array.isArray(e)) return e.length ? e.join(" · ") : null; const v = Object.values(e).filter(Boolean); return v.length ? v.join(" · ") : null; };
     try {
-      const fr = await fetch("https://v3.football.api-sports.io/fixtures?league=1&season=" + season, { headers: AH });
+      const fr = await fetch("https://v3.football.api-sports.io/fixtures?league=" + lg.id + "&season=" + season, { headers: AH });
       const fj = await fr.json();
       const fErr = apiErr(fj);
       if (fErr) return res.status(200).json({ source, supported: false, note: "API-Football : " + fErr });
-      if (!fj.response || !fj.response.length) return res.status(200).json({ source, supported: true, found: false, note: "Aucun match de la Coupe du Monde renvoyé par API-Football (league=1, season=" + season + "). Vérifie que ton plan couvre cette compétition." });
-      const fx = fj.response.find((x) => (matchTeam(x.teams.home.name, qh) && matchTeam(x.teams.away.name, qa)) || (matchTeam(x.teams.home.name, qa) && matchTeam(x.teams.away.name, qh)));
-      if (!fx) return res.status(200).json({ source, supported: true, found: false, note: "Match « " + qh + " – " + qa + " » non trouvé parmi les " + fj.response.length + " matchs WC d'API-Football (noms d'équipes ?)." });
+      if (!fj.response || !fj.response.length) return res.status(200).json({ source, supported: true, found: false, note: "Aucun match renvoyé par API-Football (league=" + lg.id + ", season=" + season + "). Vérifie que ton plan couvre cette compétition." });
+      // Une saison de club comporte les matchs aller ET retour : on privilégie
+      // l'affiche à venir / en cours, sinon la plus récente.
+      const DONE = new Set(["FT", "AET", "PEN", "PST", "CANC", "ABD", "AWD", "WO"]);
+      const cands = fj.response.filter((x) => (matchTeam(x.teams.home.name, qh) && matchTeam(x.teams.away.name, qa)) || (matchTeam(x.teams.home.name, qa) && matchTeam(x.teams.away.name, qh)));
+      const now = Date.now();
+      const fx = cands.find((x) => !DONE.has(x.fixture.status.short) && new Date(x.fixture.date).getTime() > now - 3 * 3600 * 1000)
+        || cands.sort((a, b) => new Date(b.fixture.date) - new Date(a.fixture.date))[0];
+      if (!fx) return res.status(200).json({ source, supported: true, found: false, note: "Match « " + qh + " – " + qa + " » non trouvé parmi les " + fj.response.length + " matchs d'API-Football (noms d'équipes ?)." });
       const lr = await fetch("https://v3.football.api-sports.io/fixtures/lineups?fixture=" + fx.fixture.id, { headers: AH });
       const lj = await lr.json();
       const lErr = apiErr(lj);

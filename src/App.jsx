@@ -2007,8 +2007,96 @@ const SCORER_LEAGUES = [
   { code: "BL1", n: "Bundesliga 🇩🇪" },
   { code: "CL", n: "Ligue des Champions 🏆" },
 ];
+/* Équipe favorite mise en avant dans l'onglet National (Lyon). */
+const isLyon = (name) => normName(name).includes("lyon");
+/* Nom FR (clé CLUB_POOL) d'une équipe renvoyée par une API, pour retrouver son
+ * effectif / sa compo / sa dernière compo connue. Repli : le nom API tel quel. */
+function clubFrName(league, apiName) {
+  const list = CLUB_POOL[league] || [];
+  const n = normName(apiName);
+  const hit = list.find((c) => normName(CLUB_API_ALIAS[c.n] || c.n) === n || normName(c.n) === n)
+    || list.find((c) => { const t = normName(CLUB_API_ALIAS[c.n] || c.n); return t.includes(n) || n.includes(t); });
+  return hit ? hit.n : apiName;
+}
+/* Carte d'un match de championnat : pronostic 1/N/2 (forces live + forme +
+ * compo/formation) + panneau de composition (comme le Mondial). La compo suit la
+ * même priorité : saisie manuelle > compo officielle (live) > dernière compo
+ * connue > formation par défaut déduite du style de l'équipe. */
+function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, lastComp, lineups, onCompChange, onCompReset, onRefresh }) {
+  const flag = (CLUB_LEAGUES.find((l) => l.code === league) || {}).f || "🏆";
+  const hh = teamById(m.homeId), aw = teamById(m.awayId);
+  const frH = clubFrName(league, m.home), frA = clubFrName(league, m.away);
+  const key = lineupKey(frH, frA);
+  const lu = lineups[key];
+  const luReady = lu && lu.state === "ok" && lu.ready;
+  const rosterFor = (fr) => roster[fr] || [];
+  const one = (fr, teamObj, c, live) => {
+    const man = c && (c.xi || c.formation || c.remanie);
+    return compFactor(man ? c : (liveToComp(live) || lastComp[fr] || defaultComp(teamObj)), rosterFor(fr));
+  };
+  const R = useMemo(() => {
+    if (!hh || !aw) return null;
+    const fH = one(frH, hh, comp[frH], luReady ? lu.home : null);
+    const fA = one(frA, aw, comp[frA], luReady ? lu.away : null);
+    const home = applyLineupF({ ...hh, form: parseForm(hh.form) }, fH);
+    const away = applyLineupF({ ...aw, form: parseForm(aw.form) }, fA);
+    return predict(home, away, false, leagueAvg, rho);
+  }, [hh, aw, comp[frH], comp[frA], lastComp[frH], lastComp[frA], lu, leagueAvg, rho]);
+  const lyon = isLyon(frH) || isLyon(frA);
+  const mx = R ? Math.max(R.pH, R.pD, R.pA) : 0;
+  const ta = { n: frH, f: flag }, tb = { n: frA, f: flag };
+  return (
+    <div className={"wc-m" + (lyon ? " nat-lyon" : "")}>
+      <div className="wc-mmeta">
+        <span className="wc-mdate">{formatFrDate(m.date)}</span>
+        {lyon && <span className="nat-fav">⭐ Lyon</span>}
+      </div>
+      <div className="wc-mline">
+        <span className={"wc-mt" + (isLyon(frH) ? " nat-lyon-t" : "")}>{flag} {frH}</span>
+        <i style={{ color: "var(--dim)", fontStyle: "normal" }}>–</i>
+        <span className={"wc-mt wc-r" + (isLyon(frA) ? " nat-lyon-t" : "")}>{frA}</span>
+      </div>
+      {R ? (<>
+        <div className="wc-pred">
+          <div className={"wc-pc" + (R.pH === mx ? " wc-pc-top" : "")}><b>1</b><em>{pct(R.pH)}%</em></div>
+          <div className={"wc-pc" + (R.pD === mx ? " wc-pc-top" : "")}><b>N</b><em>{pct(R.pD)}%</em></div>
+          <div className={"wc-pc" + (R.pA === mx ? " wc-pc-top" : "")}><b>2</b><em>{pct(R.pA)}%</em></div>
+        </div>
+        <div className="wc-kb">Score probable <b>{R.score}</b> · xG {R.lh.toFixed(2)}–{R.la.toFixed(2)} · +2,5 buts {pct(R.over25)}%</div>
+      </>) : <div className="wc-kb">Forces indisponibles pour cette affiche.</div>}
+      <LineupPanel
+        ta={ta} tb={tb}
+        compA={comp[frH]} compB={comp[frA]}
+        onCompChange={onCompChange} onCompReset={onCompReset}
+        rosterA={rosterFor(frH)} rosterB={rosterFor(frA)}
+        liveA={luReady ? lu.home : null} liveB={luReady ? lu.away : null}
+        prevA={lastComp[frH]} prevB={lastComp[frA]}
+        luState={lu} onRefresh={() => onRefresh(frH, frA)}
+        defFormA={defaultFormation(hh)} defFormB={defaultFormation(aw)}
+      />
+    </div>
+  );
+}
+/* Journée de championnat repliable : liste les affiches et leurs pronostics. */
+function JourneeCard({ j, defOpen, ...cardProps }) {
+  const [open, setOpen] = useState(defOpen);
+  const hasLyon = j.matches.some((m) => isLyon(clubFrName(cardProps.league, m.home)) || isLyon(clubFrName(cardProps.league, m.away)));
+  return (
+    <div className="pf-card wc-group">
+      <button className="wc-group-head" onClick={() => setOpen(!open)}>
+        <span className="wc-glabel">Journée {j.md || "?"}{hasLyon && <span className="nat-fav" style={{ marginLeft: 7 }}>⭐ Lyon</span>}</span>
+        <span className="wc-gprog">{j.matches.length} match{j.matches.length > 1 ? "s" : ""}</span>
+        <ChevronDown size={16} className={open ? "pf-rot" : ""} />
+      </button>
+      {open && <div className="wc-group-body wc-matches">
+        {j.matches.map((m, i) => <NationalMatchCard key={m.id || i} m={m} {...cardProps} />)}
+      </div>}
+    </div>
+  );
+}
 function LiveTab() {
   const [league, setLeague] = useState("FL1");
+  const [view, setView] = useState("journees"); // "journees" (tableau) | "analyse" (match/cotes)
   const [teams, setTeams] = useState([]);
   const [a, setA] = useState(0), [b, setB] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -2057,6 +2145,66 @@ function LiveTab() {
   const [up, setUp] = useState([]);
   const [odds, setOdds] = useState([]);
   const [oddsNote, setOddsNote] = useState("");
+  // Effectif réel des clubs (football-data) + buteurs : pré-remplit l'onze probable.
+  const [roster, setRoster] = useState({}); // frName -> [{name,pos,goals,assists}]
+  // Compo OFFICIELLE live (API-Football) chargée à la demande, par affiche.
+  const [lineups, setLineups] = useState({}); // lineupKey -> { state, ready, home, away }
+  // Compo saisie + dernière compo connue par club (persistées, clé = nom FR).
+  const [comp, setComp] = useState({});
+  const [lastComp, setLastComp] = useState({});
+  const [persistLoaded, setPersistLoaded] = useState(false);
+  useEffect(() => { (async () => {
+    const c = await store.get("club:comp:v1"), lc = await store.get("club:lastcomp:v1");
+    if (c) setComp(c); if (lc) setLastComp(lc); setPersistLoaded(true);
+  })(); }, []);
+  useEffect(() => { if (persistLoaded) store.set("club:comp:v1", comp); }, [comp, persistLoaded]);
+  useEffect(() => { if (persistLoaded) store.set("club:lastcomp:v1", lastComp); }, [lastComp, persistLoaded]);
+  const onCompChange = (name, patch) => setComp((p) => ({ ...p, [name]: { ...(p[name] || {}), ...patch } }));
+  const onCompReset = (name) => setComp((p) => { const n = { ...p }; delete n[name]; return n; });
+  // Effectif réel de tous les clubs du championnat (squad + buts/passes).
+  useEffect(() => {
+    let on = true; setRoster({});
+    (async () => {
+      try {
+        const [tr, sr] = await Promise.all([
+          fetch("/api/stats?source=teams&league=" + league),
+          fetch("/api/stats?source=scorers&league=" + league),
+        ]);
+        const td = tr.ok ? await tr.json() : { teams: [] };
+        const sd = sr.ok ? await sr.json() : { players: [] };
+        const scByTeam = {};
+        (sd.players || []).forEach((p) => { const t = normName(p.team || ""); (scByTeam[t] = scByTeam[t] || []).push({ name: p.name, goals: p.goals || 0, assists: p.assists || 0 }); });
+        const out = {};
+        (td.teams || []).forEach((t) => {
+          const fr = clubFrName(league, t.name);
+          const sc = scByTeam[normName(t.fullName || "")] || scByTeam[normName(t.name || "")] || [];
+          const byLast = {}; sc.forEach((p) => { byLast[lastNm(p.name)] = p; });
+          const players = (t.squad || []).map((p) => { const s = byLast[lastNm(p.name)]; return { name: p.name, pos: posGroup(p.position), goals: s ? s.goals : 0, assists: s ? s.assists : 0 }; });
+          if (players.length) out[fr] = players;
+        });
+        if (on) setRoster(out);
+      } catch { /* effectifs indisponibles : saisie manuelle possible */ }
+    })();
+    return () => { on = false; };
+  }, [league]);
+  // Compo officielle (live) d'une affiche : la mémorise comme dernière compo connue.
+  const loadLineup = async (frH, frA) => {
+    const k = lineupKey(frH, frA);
+    setLineups((p) => ({ ...p, [k]: { state: "loading" } }));
+    try {
+      const qh = CLUB_API_ALIAS[frH] || frH, qa = CLUB_API_ALIAS[frA] || frA;
+      const r = await fetch("/api/stats?source=lineup&league=" + league + "&home=" + encodeURIComponent(qh) + "&away=" + encodeURIComponent(qa));
+      const d = await r.json();
+      setLineups((p) => ({ ...p, [k]: { state: "ok", ...d } }));
+      if (d && d.ready) setLastComp((p) => {
+        const n = { ...p };
+        const ch = liveToComp(d.home), ca = liveToComp(d.away);
+        if (ch && ch.xi && ch.xi.length) n[frH] = ch;
+        if (ca && ca.xi && ca.xi.length) n[frA] = ca;
+        return n;
+      });
+    } catch { setLineups((p) => ({ ...p, [k]: { state: "err" } })); }
+  };
   const ta = teams[a], tb = teams[b];
   const hist = ta && tb && a !== b
     ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
@@ -2073,7 +2221,8 @@ function LiveTab() {
   }, [ta && ta.id, tb && tb.id]);
   useEffect(() => {
     let on = true; setFin([]); setUp([]);
-    fetch("/api/stats?source=matches&league=" + league)
+    // all=1 : calendrier COMPLET de la saison -> regroupement par journée.
+    fetch("/api/stats?source=matches&league=" + league + "&all=1")
       .then((r) => r.json()).then((d) => { if (!on) return; setFin(d.finished || []); setUp(d.upcoming || []); })
       .catch(() => {});
     return () => { on = false; };
@@ -2087,6 +2236,16 @@ function LiveTab() {
   }, [league]);
   const byId = (id) => teams.find((t) => t.id === id);
   const byName = (n) => teams.find((t) => normName(t.name) === normName(n));
+  const teamById = (id) => byId(id);
+  // Prochaines journées : matchs à venir regroupés par journée (chronologique).
+  const journees = useMemo(() => {
+    const byMd = {};
+    up.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
+    return Object.keys(byMd).map(Number).sort((x, y) => x - y)
+      .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
+  }, [up]);
+  const rho = LEAGUE_RHO[league] || RHO;
+  const cardProps = { league, teamById, leagueAvg, rho, roster, comp, lastComp, lineups, onCompChange, onCompReset, onRefresh: loadLineup };
   const fixtureProbs = (m) => {
     const hh = byId(m.homeId), aw = byId(m.awayId);
     if (!hh || !aw) return null;
@@ -2108,15 +2267,24 @@ function LiveTab() {
   return (
     <>
       <section className="pf-card">
-        <div className="pf-result-head"><Radio size={15} /> Forces — saison en cours</div>
+        <div className="pf-result-head"><Radio size={15} /> Championnats nationaux — saison en cours</div>
         <div className="lv-ctrl">
           <select value={league} onChange={(e) => setLeague(e.target.value)}>{LIVE_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
           <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
         </div>
+        <div className="wc-subnav" style={{ marginTop: 8 }}>
+          <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Layers size={15} /> Journées</button>
+          <button className={view === "analyse" ? "wc-sb on" : "wc-sb"} onClick={() => setView("analyse")}><Target size={15} /> Match & cotes</button>
+        </div>
         <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois l'app déployée sur Vercel avec <code>FOOTBALLDATA_TOKEN</code> configuré (jeton gratuit sur football-data.org).</span></div>}
       </section>
-      {teams.length > 0 && (<>
+      {teams.length > 0 && view === "journees" && (<>
+        <div className="wc-hint">Tableau des <b>journées à venir</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
+        {journees.length ? journees.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
+          : <section className="pf-card"><div className="lv-meta">Aucun match à venir renvoyé par l'API (intersaison ?).</div></section>}
+      </>)}
+      {teams.length > 0 && view === "analyse" && (<>
         <section className="pf-card">
           <div className="pf-result-head">Match (forces réelles)</div>
           <div className="lv-pick">
@@ -2140,16 +2308,6 @@ function LiveTab() {
                 <span className="h2h-match">{short(m.homeTeam)} <b>{m.homeGoals}–{m.awayGoals}</b> {short(m.awayTeam)}</span>
               </div>))}</div>
           ) : <div className="lv-meta">{h2hMsg || "—"}</div>}
-        </section>)}
-        {up.length > 0 && (
-        <section className="pf-card">
-          <div className="pf-result-head">Prochains matchs · pronostic 1/N/2</div>
-          <div className="res">{up.map((m, i) => { const p = fixtureProbs(m); return (
-            <div key={i} className="res-row">
-              <span className="res-d">{(m.date || "").slice(5, 10)}</span>
-              <span className="res-m">{short(m.home)} – {short(m.away)}</span>
-              {p ? <span className="up-p">{pct(p.pH)}/{pct(p.pD)}/{pct(p.pA)}</span> : <span className="up-p">—</span>}
-            </div>); })}</div>
         </section>)}
         <section className="pf-card">
           <div className="pf-result-head"><TrendingUp size={15} /> Cotes & value (multi-bookmakers)</div>
@@ -2181,7 +2339,7 @@ function LiveTab() {
         <section className="pf-card">
           <div className="pf-result-head">Forces du championnat (live)</div>
           <table className="wc-st"><thead><tr><th>Équipe</th><th>J</th><th>Att</th><th>Déf</th></tr></thead>
-            <tbody>{teams.map((t, i) => <tr key={i}><td className="wc-tn">{short(t.name)}</td><td>{t.matches}</td><td className="wc-pts">{t.att.toFixed(2)}</td><td>{t.def.toFixed(2)}</td></tr>)}</tbody>
+            <tbody>{teams.map((t, i) => <tr key={i} className={isLyon(t.name) ? "nat-lyon-row" : ""}><td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td><td>{t.matches}</td><td className="wc-pts">{t.att.toFixed(2)}</td><td>{t.def.toFixed(2)}</td></tr>)}</tbody>
           </table>
         </section>
       </>)}
@@ -2517,7 +2675,7 @@ function SquadsTab() {
 
 /* ========================= App ========================= */
 export default function App() {
-  const [tab, setTab] = useState("match");
+  const [tab, setTab] = useState("live");
   const [intlMatches, setIntlMatches] = useState([]);
   const [matchRequest, setMatchRequest] = useState(null);
   useEffect(() => {
@@ -2532,14 +2690,14 @@ export default function App() {
       <style>{CSS}</style>
       <header className="pf-header">
         <div className="pf-brand">PRONOSTIC<span>FOOT</span></div>
-        <div className="pf-sub">Elo + Poisson · groupes officiels Mondial 2026 · données live</div>
+        <div className="pf-sub">Elo + Poisson · championnats en direct · compositions live</div>
       </header>
       <nav className="pf-tabs">
+        <button className={tab === "live" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("live")}>National</button>
         <button className={tab === "match" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("match")}>Match</button>
-        <button className={tab === "cdm" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("cdm")}>Mondial 26</button>
-        <button className={tab === "live" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("live")}>Live</button>
         <button className={tab === "scorers" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("scorers")}>Buteurs</button>
         <button className={tab === "squads" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("squads")}>Effectifs</button>
+        <button className={tab === "cdm" ? "pf-tab on" : "pf-tab"} onClick={() => setTab("cdm")}>Mondial 26</button>
       </nav>
       <main className="pf-main">
         {tab === "match" ? <MatchTab intlMatches={intlMatches} matchRequest={matchRequest} /> : tab === "cdm" ? <WorldCupTab intlMatches={intlMatches} onOpenMatch={openMatch} /> : tab === "live" ? <LiveTab /> : tab === "scorers" ? <ScorersTab /> : <SquadsTab />}
@@ -2784,6 +2942,12 @@ const CSS = `
 .lv-pick{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
 .lv-pick select{flex:1;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:11px;font-size:13px;}
 .lv-pick span{color:var(--dim);font-size:12px;}
+/* onglet National : mise en avant de Lyon + cartes de journée */
+.wc-matches .wc-m{background:#0e1116;}
+.nat-lyon{border-color:rgba(70,211,255,.45)!important;box-shadow:inset 0 0 0 1px rgba(70,211,255,.18);}
+.nat-lyon-t{color:var(--cyan)!important;font-weight:800;}
+.nat-fav{font-size:9.5px;font-weight:800;letter-spacing:.03em;background:rgba(70,211,255,.16);color:var(--cyan);border-radius:5px;padding:1px 6px;text-transform:uppercase;}
+.nat-lyon-row td{color:var(--cyan)!important;}.nat-lyon-row .wc-pts{color:var(--cyan)!important;}
 .sc-team{width:100%;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px;font-size:13px;margin-bottom:8px;}
 .sq-team-block{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--line);}
 .sq-team-block:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
