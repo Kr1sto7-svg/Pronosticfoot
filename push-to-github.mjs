@@ -108,7 +108,7 @@ async function main() {
 
   console.log("💬  Création du commit...");
   const commitBody = {
-    message: "Réorientation post-Mondial : onglet National (championnats) devient l'onglet principal et par défaut, Mondial 26 passe en dernier. Onglet National enrichi — Ligue 1 par défaut, tableau des JOURNÉES à venir groupées par matchday avec pronostic 1/N/2 par affiche, panneau composition/formation par match (compo live API + dernière compo connue par défaut, comme le Mondial), Lyon mis en avant. API 'lineup' étendue aux 5 grands championnats + Primeira/Eredivisie/LDC (LG_AF). Ancienne version conservée sur la branche v4-mondial.",
+    message: "Réorientation post-Mondial + Match National + onglet Europe. National = onglet principal/défaut (Ligue 1, journées avec pronostic+compo, Lyon en avant), Mondial 26 en dernier. Onglet Match : National avant International + par défaut, avec forme 5 derniers (V/N/D) et panneau composition/effectif (compo live API / saisie manuelle+formations / dernière connue) intégré au pronostic. Nouvel onglet Europe = Ligue des Champions phase de ligue (classement 36 + zones qualif + journées avec compos ; C1 seule, C3 hors offre gratuite). Hook useClubLineups partagé, API lineup étendue aux clubs (LG_AF), API standings enrichie (rang/points/V-N-D). Ancienne version conservée sur la branche v4-mondial.",
     tree: newTree.sha,
   };
   if (parentSha) commitBody.parents = [parentSha];

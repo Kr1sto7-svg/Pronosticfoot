@@ -501,6 +501,11 @@ export default async function handler(req, res) {
         name: row.team.name,
         crest: row.team.crest,
         matches: row.playedGames,
+        // Classement (utile pour la phase de ligue européenne : rang + points + V/N/D).
+        position: row.position,
+        points: row.points,
+        won: row.won, draw: row.draw, lost: row.lost,
+        goalDifference: row.goalDifference,
         goalsFor: row.goalsFor,
         goalsAgainst: row.goalsAgainst,
         form: row.form || "",
