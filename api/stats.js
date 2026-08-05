@@ -166,12 +166,15 @@ export default async function handler(req, res) {
     const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
     // Indice offensif des formations courantes (1 = neutre, >1 offensive, <1 défensive).
     const FORM_OFF = { "3-4-3": 1.12, "4-3-3": 1.08, "3-5-2": 1.05, "4-2-3-1": 1.05, "3-4-2-1": 1.05, "4-4-2": 1.00, "4-1-4-1": 0.98, "4-4-1-1": 0.97, "4-5-1": 0.93, "5-3-2": 0.92, "5-4-1": 0.88 };
-    // Correspondance code compétition -> id + saison API-Football. La Coupe du Monde
-    // (league=1, saison 2026) et les 5 grands championnats de clubs (saison 2025-26).
+    // Correspondance code compétition -> id + saison API-Football. La saison des
+    // compétitions de CLUBS est calculée dynamiquement (à partir de juillet, on
+    // passe à la nouvelle saison N/N+1) : les effectifs/compos suivent le mercato.
+    const nowY = new Date(), clubSeason = String(nowY.getMonth() >= 6 ? nowY.getFullYear() : nowY.getFullYear() - 1);
     const LG_AF = {
-      WC: { id: 1, season: "2026" }, FL1: { id: 61, season: "2025" }, PL: { id: 39, season: "2025" },
-      PD: { id: 140, season: "2025" }, BL1: { id: 78, season: "2025" }, SA: { id: 135, season: "2025" },
-      PPL: { id: 94, season: "2025" }, DED: { id: 88, season: "2025" }, CL: { id: 2, season: "2025" },
+      WC: { id: 1, season: "2026" }, FL1: { id: 61, season: clubSeason }, PL: { id: 39, season: clubSeason },
+      PD: { id: 140, season: clubSeason }, BL1: { id: 78, season: clubSeason }, SA: { id: 135, season: clubSeason },
+      PPL: { id: 94, season: clubSeason }, DED: { id: 88, season: clubSeason }, CL: { id: 2, season: clubSeason },
+      EL: { id: 3, season: clubSeason },
     };
     const lg = LG_AF[req.query.league || "WC"] || LG_AF.WC;
     const season = req.query.season || lg.season;
