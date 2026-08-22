@@ -516,8 +516,9 @@ function h2hEmpirical(homeName, meetings) {
   return n ? { n, pH: hw / n, pD: d / n, pA: aw / n } : null;
 }
 // 1/N/2 enrichi : forces de la saison + forme récente (via predict) + confrontations directes.
-function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = RHO) {
-  const base = predict(home, away, true, leagueAvg, rho);
+// neutral=false par défaut : le 1er argument est l'équipe qui REÇOIT (avantage domicile).
+function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = RHO, neutral = false) {
+  const base = predict(home, away, neutral, leagueAvg, rho);
   const emp = meetings && meetings.length ? h2hEmpirical(home.name, meetings) : null;
   if (!emp || emp.n < 3) return { R: base, h2hN: emp ? emp.n : 0, w: 0 };
   const w = Math.min(0.22, emp.n * 0.035); // poids croissant, plafonné (le H2H reste peu fiable)
@@ -1211,6 +1212,20 @@ function assembleClubPool({ league, live, base, unionBase, defFlag }) {
   });
   return out.sort((a, b) => a.n.localeCompare(b.n, "fr"));
 }
+/* Fusionne une équipe issue du classement live (buts/xG) avec sa fiche de
+ * référence (CLUB_POOL/EURO_POOL) : blend géométrique dont le poids du live croît
+ * avec les matchs joués (0.12/match, plafond 0.85) + Elo de référence (sinon
+ * estimé depuis les forces). MÊME convention que assembleClubPool (onglet Match)
+ * -> tous les onglets calculent un même match sur les MÊMES forces. En tout début
+ * de saison (0 match), on retombe sur la référence au lieu de forces neutres. */
+function blendWithReference(league, t) {
+  const b = ratingLookup(clubFrName(league, t.name));
+  const played = t.matches || 0;
+  const w = Math.min(0.85, 0.12 * played);
+  const att = b ? (played ? Math.pow(b.att, 1 - w) * Math.pow(t.att, w) : b.att) : t.att;
+  const def = b ? (played ? Math.pow(b.def, 1 - w) * Math.pow(t.def, w) : b.def) : t.def;
+  return { ...t, att, def, elo: (b && b.elo) || eloFromRatings(att, def) };
+}
 /* Calendrier (résultats + prochains matchs avec dates) d'une compétition.
  * Cache module : 1 appel par compétition et par session (le proxy cache au bord). */
 const clubFixturesCache = {};
@@ -1251,7 +1266,7 @@ function NextFixtureBanner({ league, home, away }) {
 }
 /* Calendrier repliable des prochaines journées du championnat (ou de la C1 en mode
  * Europe), avec dates et pronostic express 1/N/2 tiré des forces de la saison. */
-function MatchCalendar({ league, pool, leagueAvg, rho }) {
+function MatchCalendar({ league, pool, leagueAvg, rho, club }) {
   const [open, setOpen] = useState(false);
   const { upcoming } = useLeagueFixtures(league);
   const journees = useMemo(() => {
@@ -1262,7 +1277,14 @@ function MatchCalendar({ league, pool, leagueAvg, rho }) {
   }, [upcoming]);
   const poolByName = useMemo(() => { const o = {}; (pool || []).forEach((t) => { o[normName(t.n)] = t; }); return o; }, [pool]);
   const byName = (n) => poolByName[normName(clubFrName(league, n))];
-  const pred = (m) => { const h = byName(m.home), a = byName(m.away); if (!h || !a) return null; return predict({ ...h }, { ...a }, false, leagueAvg, rho); };
+  // Facteur compo/formation (saisie > dernière connue > défaut) quand le store
+  // des compos est fourni : mêmes probabilités que les cartes de journée.
+  const lf = (t) => {
+    if (!club) return { ...t };
+    const c = club.comp[t.n]; const man = c && (c.xi || c.formation || c.remanie);
+    return applyLineupF({ ...t }, compFactor(man ? c : (club.lastComp[t.n] || defaultComp(t)), club.roster[t.n] || []));
+  };
+  const pred = (m) => { const h = byName(m.home), a = byName(m.away); if (!h || !a) return null; return predict(lf(h), lf(a), false, leagueAvg, rho); };
   if (!league) return null;
   return (
     <section className="pf-card">
@@ -1362,6 +1384,18 @@ function MatchTab({ intlMatches = [], matchRequest }) {
   const homeRisk = scope === "intl" ? (riskMap[(home || {}).n] || 0) : 0;
   const awayRisk = scope === "intl" ? (riskMap[(away || {}).n] || 0) : 0;
   const h2h = useMemo(() => scope === "intl" ? getH2HFromIntl(intlMatches, home.n, away.n) : [], [scope, home.n, away.n, intlMatches]);
+  // Confrontations directes CLUBS (historique football-data, multi-saisons) :
+  // même source et même pondération que la vue « Match & cotes » du National.
+  const [clubH2h, setClubH2h] = useState([]);
+  useEffect(() => {
+    if (scope === "intl" || same || !home.id || !away.id) { setClubH2h([]); return; }
+    let on = true; setClubH2h([]);
+    fetch("/api/stats?source=h2h&home=" + home.id + "&away=" + away.id)
+      .then((r) => r.json())
+      .then((d) => { if (on) setClubH2h(d.meetings || []); })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [scope, same, home && home.id, away && away.id]);
   const R = useMemo(() => {
     if (same) return null;
     let H = applyRisk(home, homeRisk), A = applyRisk(away, awayRisk);
@@ -1376,6 +1410,25 @@ function MatchTab({ intlMatches = [], matchRequest }) {
       A = applyLineupF(A, one(away.n, away, club.comp[away.n], luReady ? luM.away : null));
     }
     const p = predict(H, A, neutral, leagueAvg, rho);
+    // Clubs : blend H2H multi-saisons (mêmes seuil n>=3 et poids que predictWithHistory).
+    if (scope !== "intl") {
+      if (!clubH2h.length) return p;
+      let wN = 0, dN = 0, lN = 0;
+      clubH2h.forEach((m) => {
+        if (m.homeGoals == null || m.awayGoals == null) return;
+        const hostFr = clubFrName(liveLeagueCode, m.homeTeam), guestFr = clubFrName(liveLeagueCode, m.awayTeam);
+        const hosts = hostFr === home.n, visits = guestFr === home.n;
+        if (!hosts && !visits) return;
+        const gf = hosts ? m.homeGoals : m.awayGoals, ga = hosts ? m.awayGoals : m.homeGoals;
+        if (gf > ga) wN++; else if (gf < ga) lN++; else dN++;
+      });
+      const n = wN + dN + lN;
+      if (n < 3) return p;
+      const w = Math.min(0.22, n * 0.035);
+      const pH = p.pH * (1 - w) + (wN / n) * w, pD = p.pD * (1 - w) + (dN / n) * w, pA = p.pA * (1 - w) + (lN / n) * w;
+      const s = pH + pD + pA || 1;
+      return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
+    }
     if (h2h.length < 2) return p;
     let hw = 0, dr = 0, aw = 0;
     h2h.forEach((m) => { if (m.hg > m.ag) hw++; else if (m.hg < m.ag) aw++; else dr++; });
@@ -1384,7 +1437,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
     const pH = (p.pH * (1 - w) + (hw / n) * w), pD = (p.pD * (1 - w) + (dr / n) * w), pA = (p.pA * (1 - w) + (aw / n) * w);
     const s = pH + pD + pA || 1;
     return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
-  }, [same, home, away, homeRisk, awayRisk, neutral, leagueAvg, rho, h2h, scope, club.comp, club.lastComp, club.roster, luM]);
+  }, [same, home, away, homeRisk, awayRisk, neutral, leagueAvg, rho, h2h, clubH2h, liveLeagueCode, scope, club.comp, club.lastComp, club.roster, luM]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
@@ -1441,7 +1494,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
           <div className="lv-meta">Compo officielle (live) via 🔴, ou saisie à la main (liste des joueurs de l'effectif + formations). Elle est intégrée au pronostic ci-dessus.</div>
         </section>
       )}
-      {scope !== "intl" && <MatchCalendar league={liveLeagueCode} pool={pool} leagueAvg={leagueAvg} rho={rho} />}
+      {scope !== "intl" && <MatchCalendar league={liveLeagueCode} pool={pool} leagueAvg={leagueAvg} rho={rho} club={club} />}
       {same && <div className="pf-warn">Choisis deux équipes différentes.</div>}
       {R && (homeRisk > 0 || awayRisk > 0) && <div className="pf-risk-badge">⚡ Contexte Mondial : {[homeRisk > 0 ? home.n : null, awayRisk > 0 ? away.n : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
       {R && R.h2hN > 0 && <div className="pf-h2h-badge">🔁 {R.h2hN} confrontation{R.h2hN > 1 ? "s" : ""} directe{R.h2hN > 1 ? "s" : ""} prise{R.h2hN > 1 ? "s" : ""} en compte</div>}
@@ -2642,7 +2695,7 @@ function LiveTab() {
         const clubs = td.teams || [];
         if (!clubs.length) throw new Error("Aucune donnée (championnat hors du plan gratuit football-data.org ?)");
         tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, homeAtt: null, awayAtt: null, homeDef: null, awayDef: null }));
-        setNote("Saison qui démarre : classement pas encore publié — forces par défaut. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
+        setNote("Saison qui démarre : classement pas encore publié — forces de référence des clubs. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
       }
       // xG RÉEL (Understat) prioritaire quand disponible : remplace les forces basées sur les buts.
       try {
@@ -2663,6 +2716,9 @@ function LiveTab() {
           });
         }
       } catch { /* repli silencieux sur les forces basées sur les buts */ }
+      // Fusion avec la fiche de référence (Elo + forces) : mêmes forces que
+      // l'onglet Match -> probabilités cohérentes entre les onglets.
+      tm = tm.map((t) => blendWithReference(league, t));
       setTeams(tm); setXgOn(xgActive); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
@@ -2679,8 +2735,21 @@ function LiveTab() {
   // commun avec l'onglet Match, partagé via le store).
   const { roster, lineups, comp, lastComp, onCompChange, onCompReset, loadLineup } = useClubLineups(league, true);
   const ta = teams[a], tb = teams[b];
+  // Équipe « effective » pour TOUT calcul de cet onglet : forme parsée + facteur
+  // composition/formation (saisie > compo officielle live > dernière connue >
+  // défaut) — mêmes critères que les cartes de journée, donc mêmes probabilités
+  // pour un même match quelle que soit la vue.
+  const effClub = (t, live) => {
+    if (!t) return t;
+    const fr = clubFrName(league, t.name);
+    const c = comp[fr]; const man = c && (c.xi || c.formation || c.remanie);
+    const f = compFactor(man ? c : (liveToComp(live) || lastComp[fr] || defaultComp(t)), roster[fr] || []);
+    return applyLineupF({ ...t, form: parseForm(t.form) }, f);
+  };
+  const analyseLu = ta && tb && a !== b ? lineups[lineupKey(clubFrName(league, ta.name), clubFrName(league, tb.name))] : null;
+  const analyseLuOk = analyseLu && analyseLu.state === "ok" && analyseLu.ready;
   const hist = ta && tb && a !== b
-    ? predictWithHistory({ ...ta, form: parseForm(ta.form) }, { ...tb, form: parseForm(tb.form) }, h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
+    ? predictWithHistory(effClub(ta, analyseLuOk ? analyseLu.home : null), effClub(tb, analyseLuOk ? analyseLu.away : null), h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
     : null;
   const R = hist ? hist.R : null;
   useEffect(() => {
@@ -2729,13 +2798,13 @@ function LiveTab() {
   const fixtureProbs = (m) => {
     const hh = byId(m.homeId), aw = byId(m.awayId);
     if (!hh || !aw) return null;
-    return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg, LEAGUE_RHO[league] || RHO);
+    return predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO);
   };
   // Value = proba modèle × meilleure cote. > 1,05 -> le modèle voit de la valeur.
   const oddsValue = (ev) => {
     const hh = byName(ev.home), aw = byName(ev.away);
     if (!hh || !aw) return null;
-    const p = predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg, LEAGUE_RHO[league] || RHO);
+    const p = predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO);
     const v = [
       { k: "1", lbl: short(ev.home), ev: p.pH * ev.oddsH, pm: p.pH },
       { k: "N", lbl: "Nul", ev: p.pD * ev.oddsD, pm: p.pD },
@@ -2812,7 +2881,7 @@ function LiveTab() {
             <div className="pf-tiles"><OutcomeTile label={"Victoire " + short(ta.name)} value={pct(R.pH)} kind="h" /><OutcomeTile label="Match nul" value={pct(R.pD)} kind="d" /><OutcomeTile label={"Victoire " + short(tb.name)} value={pct(R.pA)} kind="a" /></div>
             <div className="pf-scores">{R.topScores.map((s, i) => (<div key={i} className={"pf-scell" + (i === 0 ? " pf-scell-top" : "")}><div className="pf-scell-s">{s.s}</div><div className="pf-scell-p">{pct(s.p)}%</div></div>))}</div>
             <div className="lv-meta">xG {R.lh.toFixed(2)}–{R.la.toFixed(2)} · +2,5 buts {pct(R.over25)}% · les deux marquent {pct(R.btts)}%</div>
-            <div className="lv-meta">Pris en compte : {xgOn ? "xG réel (Understat)" : "xG estimé d'après les buts"} + forme récente (5 derniers) + {hist.h2hN || 0} confrontation(s){hist.w ? " · poids historique " + pct(hist.w) + "%" : ""}</div></>)}
+            <div className="lv-meta">Pris en compte : {xgOn ? "xG réel (Understat)" : "xG estimé d'après les buts"} + hiérarchie Elo + avantage du terrain + forme récente (5 derniers) + composition/formation + {hist.h2hN || 0} confrontation(s){hist.w ? " · poids historique " + pct(hist.w) + "%" : ""}</div></>)}
         </section>
         {R && (
         <section className="pf-card">
@@ -2922,8 +2991,10 @@ function EuropeTab() {
         const clubs = td.teams || [];
         if (!clubs.length) throw new Error("Aucune donnée (phase de ligue pas encore tirée, ou hors plan gratuit).");
         tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, position: null, points: null }));
-        setNote("Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces par défaut (classement dès les premiers matchs).");
+        setNote("Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces de référence (classement dès les premiers matchs).");
       }
+      // Même fusion forces de référence + Elo que l'onglet Match / National.
+      tm = tm.map((t) => blendWithReference("CL", t));
       setTeams(tm); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG.CL); setUpdated(new Date());
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
