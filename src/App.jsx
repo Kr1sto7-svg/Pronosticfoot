@@ -2656,18 +2656,28 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, 
   const lyon = isLyon(frH) || isLyon(frA);
   const mx = R ? Math.max(R.pH, R.pD, R.pA) : 0;
   const ta = { n: frH, f: flag }, tb = { n: frA, f: flag };
+  // Match déjà joué : on affiche le score final au lieu du pronostic (et on masque
+  // le panneau de composition, sans objet). Sert à compléter les journées en cours
+  // partiellement disputées (sinon les matchs joués disparaissent de la journée).
+  const played = m.homeGoals != null && m.awayGoals != null;
+  const winH = played && m.winner === "HOME_TEAM", winA = played && m.winner === "AWAY_TEAM";
   return (
     <div className={"wc-m" + (lyon ? " nat-lyon" : "")}>
       <div className="wc-mmeta">
         <span className="wc-mdate">{formatFrDate(m.date)}</span>
+        {played && <span className="wc-mdone">Terminé</span>}
         {lyon && <span className="nat-fav">⭐ Lyon</span>}
       </div>
       <div className="wc-mline">
-        <span className={"wc-mt" + (isLyon(frH) ? " nat-lyon-t" : "")}>{flag} {frH}</span>
+        <span className={"wc-mt" + (isLyon(frH) ? " nat-lyon-t" : "")} style={winH ? { fontWeight: 800 } : undefined}>{flag} {frH}</span>
         <i style={{ color: "var(--dim)", fontStyle: "normal" }}>–</i>
-        <span className={"wc-mt wc-r" + (isLyon(frA) ? " nat-lyon-t" : "")}>{frA}</span>
+        <span className={"wc-mt wc-r" + (isLyon(frA) ? " nat-lyon-t" : "")} style={winA ? { fontWeight: 800 } : undefined}>{frA}</span>
       </div>
-      {R ? (<>
+      {played ? (
+        <div className="wc-pred">
+          <div className="wc-pc wc-pc-top" style={{ flex: 1 }}><b>Score final</b><em>{m.homeGoals} – {m.awayGoals}</em></div>
+        </div>
+      ) : R ? (<>
         <div className="wc-pred">
           <div className={"wc-pc" + (R.pH === mx ? " wc-pc-top" : "")}><b>1</b><em>{pct(R.pH)}%</em></div>
           <div className={"wc-pc" + (R.pD === mx ? " wc-pc-top" : "")}><b>N</b><em>{pct(R.pD)}%</em></div>
@@ -2675,7 +2685,7 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, 
         </div>
         <div className="wc-kb">Score probable <b>{R.score}</b> · xG {R.lh.toFixed(2)}–{R.la.toFixed(2)} · +2,5 buts {pct(R.over25)}%</div>
       </>) : <div className="wc-kb">Forces indisponibles pour cette affiche.</div>}
-      <LineupPanel
+      {!played && <LineupPanel
         ta={ta} tb={tb}
         compA={comp[frH]} compB={comp[frA]}
         onCompChange={onCompChange} onCompReset={onCompReset}
@@ -2684,7 +2694,7 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, 
         prevA={lastComp[frH]} prevB={lastComp[frA]}
         luState={lu} onRefresh={() => onRefresh(frH, frA)}
         defFormA={defaultFormation(hh)} defFormB={defaultFormation(aw)}
-      />
+      />}
     </div>
   );
 }
@@ -2847,13 +2857,18 @@ function LiveTab() {
   const byId = (id) => teams.find((t) => t.id === id);
   const byName = (n) => teams.find((t) => normName(t.name) === normName(n));
   const teamById = (id) => byId(id);
-  // Prochaines journées : matchs à venir regroupés par journée (chronologique).
+  // Prochaines journées : matchs à venir regroupés par journée (chronologique). On
+  // COMPLÈTE chaque journée en cours avec ses matchs DÉJÀ JOUÉS (rangés dans
+  // `finished` par l'API) — sinon une journée partiellement disputée (ex. J1/J2 en
+  // début de saison) apparaît incomplète. On n'ajoute pas les journées entièrement
+  // passées (uniquement celles qui ont encore au moins un match à venir).
   const journees = useMemo(() => {
     const byMd = {};
     up.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
+    fin.forEach((m) => { const md = m.matchday || 0; if (byMd[md]) byMd[md].push(m); });
     return Object.keys(byMd).map(Number).sort((x, y) => x - y)
       .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
-  }, [up]);
+  }, [up, fin]);
   // Classement live : tri officiel (rang API, sinon pts / diff / BP).
   const ranked = useMemo(() => teams.slice().sort((a, b) =>
     (a.position || 99) - (b.position || 99)
@@ -3644,6 +3659,7 @@ const CSS = `
 .wc-live-tag{font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;letter-spacing:.5px;text-transform:uppercase;line-height:1.4;}
 .wc-mmeta{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
 .wc-mdate{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);}
+.wc-mdone{font-size:9.5px;font-weight:800;letter-spacing:.03em;background:rgba(120,130,140,.18);color:var(--dim);border-radius:5px;padding:1px 6px;text-transform:uppercase;}
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
