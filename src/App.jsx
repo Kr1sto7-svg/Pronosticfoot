@@ -3057,6 +3057,7 @@ function EuropeTab() {
   const [updated, setUpdated] = useState(null);
   const [leagueAvg, setLeagueAvg] = useState(LEAGUE_GOALS_AVG.CL);
   const [up, setUp] = useState([]);
+  const [fin, setFin] = useState([]);
   const club = useClubLineups(league, true);
   // Cache local (même principe que l'onglet National) : hydrate depuis le dernier
   // résultat, ne réinterroge les API que si cache vide ou ↻ manuel. Clé distincte
@@ -3068,7 +3069,7 @@ function EuropeTab() {
       const c = await store.get("europe:data:" + league);
       if (c && c.teams && c.teams.length) {
         setTeams(c.teams); setLeagueAvg(c.leagueAvg || LEAGUE_GOALS_AVG.CL);
-        setUp(c.upcoming || []); setNote(c.note || ""); setUpdated(c.updated ? new Date(c.updated) : new Date());
+        setUp(c.upcoming || []); setFin(c.finished || []); setNote(c.note || ""); setUpdated(c.updated ? new Date(c.updated) : new Date());
         return;
       }
     }
@@ -3094,11 +3095,11 @@ function EuropeTab() {
       }
       // Même fusion forces de référence + Elo que l'onglet Match / National.
       tm = tm.map((t) => blendWithReference("CL", t));
-      let upcoming = [];
-      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; } catch { /* calendrier indisponible */ }
+      let upcoming = [], finished = [];
+      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
       const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG.CL;
-      setTeams(tm); setLeagueAvg(leagueAvgV); setUp(upcoming); setUpdated(new Date()); if (noteText) setNote(noteText);
-      await store.set("europe:data:" + league, { teams: tm, leagueAvg: leagueAvgV, upcoming, note: noteText, updated: new Date().toISOString() });
+      setTeams(tm); setLeagueAvg(leagueAvgV); setUp(upcoming); setFin(finished); setUpdated(new Date()); if (noteText) setNote(noteText);
+      await store.set("europe:data:" + league, { teams: tm, leagueAvg: leagueAvgV, upcoming, finished, note: noteText, updated: new Date().toISOString() });
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
@@ -3106,12 +3107,15 @@ function EuropeTab() {
   const refreshAll = () => { load(true); club.reloadRoster(); };
   const byId = (id) => teams.find((t) => t.id === id);
   const rho = LEAGUE_RHO.CL || RHO;
+  // Journées : matchs à venir + matchs déjà joués (score final) des mêmes journées,
+  // comme le National — une journée en cours reste complète (cf. NationalMatchCard).
   const journees = useMemo(() => {
     const byMd = {};
     up.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
+    fin.forEach((m) => { const md = m.matchday || 0; if (byMd[md]) byMd[md].push(m); });
     return Object.keys(byMd).map(Number).sort((x, y) => x - y)
       .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
-  }, [up]);
+  }, [up, fin]);
   const cardProps = { league, teamById: byId, leagueAvg, rho, roster: club.roster, comp: club.comp, lastComp: club.lastComp, lineups: club.lineups, onCompChange: club.onCompChange, onCompReset: club.onCompReset, onRefresh: club.loadLineup };
   const ranked = useMemo(() => teams.slice().sort((a, b) => (a.position || 99) - (b.position || 99) || (b.points || 0) - (a.points || 0)), [teams]);
   return (
