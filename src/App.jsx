@@ -2685,17 +2685,26 @@ function LiveTab() {
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
       let tm = d.teams || [], xgActive = false;
-      // Début de saison : tant qu'aucun match n'est joué, le classement est vide.
-      // On récupère alors la LISTE DES CLUBS de la saison en cours (promus/relégués
-      // à jour) avec des forces neutres, pour afficher quand même journées, compos
-      // et pronostics au lieu de bloquer tout l'onglet.
-      if (!tm.length) {
+      // Début de saison : le classement football-data peut être VIDE (aucun match
+      // joué) ou PARTIEL (les clubs à 0 match sont omis — cas de La Liga au coup
+      // d'envoi, ~15 clubs sur 20). Sans forces pour ces clubs, leurs affiches
+      // n'affichent aucun pronostic. On récupère donc la LISTE COMPLÈTE des clubs
+      // de la saison (source=teams, promus/relégués à jour) et on AJOUTE ceux qui
+      // manquent au classement, avec des forces neutres (blendWithReference les
+      // remonte ensuite au niveau de référence). Ainsi toutes les journées ont un
+      // pronostic 1/N/2, comme la Ligue 1 (dont le classement vide passait déjà en
+      // repli complet).
+      {
         const tr = await fetch("/api/stats?source=teams&league=" + league);
         const td = await tr.json().catch(() => ({}));
         const clubs = td.teams || [];
-        if (!clubs.length) throw new Error("Aucune donnée (championnat hors du plan gratuit football-data.org ?)");
-        tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, homeAtt: null, awayAtt: null, homeDef: null, awayDef: null }));
-        setNote("Saison qui démarre : classement pas encore publié — forces de référence des clubs. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
+        const have = new Set(tm.map((t) => t.id));
+        const missing = clubs
+          .filter((t) => !have.has(t.id))
+          .map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, homeAtt: null, awayAtt: null, homeDef: null, awayDef: null }));
+        if (missing.length) tm = tm.concat(missing);
+        if (!tm.length) throw new Error("Aucune donnée (championnat hors du plan gratuit football-data.org ?)");
+        if (!d.teams?.length) setNote("Saison qui démarre : classement pas encore publié — forces de référence des clubs. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
       }
       // xG RÉEL (Understat) prioritaire quand disponible : remplace les forces basées sur les buts.
       try {
