@@ -2619,19 +2619,31 @@ function LiveTab() {
   const [a, setA] = useState(0), [b, setB] = useState(1);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const [note, setNote] = useState("");
   const [updated, setUpdated] = useState(null);
   const [xgOn, setXgOn] = useState(false);
   const [leagueAvg, setLeagueAvg] = useState(BASE_GOALS);
   const load = async () => {
-    setLoading(true); setErr(null);
+    setLoading(true); setErr(null); setNote("");
     setLeagueAvg(LEAGUE_GOALS_AVG[league] || BASE_GOALS);
     try {
       // pas de paramètre season -> football-data.org renvoie la saison EN COURS
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
-      if (!d.teams || !d.teams.length) throw new Error("Aucune donnée (saison pas encore commencée ?)");
-      let tm = d.teams, xgActive = false;
+      let tm = d.teams || [], xgActive = false;
+      // Début de saison : tant qu'aucun match n'est joué, le classement est vide.
+      // On récupère alors la LISTE DES CLUBS de la saison en cours (promus/relégués
+      // à jour) avec des forces neutres, pour afficher quand même journées, compos
+      // et pronostics au lieu de bloquer tout l'onglet.
+      if (!tm.length) {
+        const tr = await fetch("/api/stats?source=teams&league=" + league);
+        const td = await tr.json().catch(() => ({}));
+        const clubs = td.teams || [];
+        if (!clubs.length) throw new Error("Aucune donnée (championnat hors du plan gratuit football-data.org ?)");
+        tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, homeAtt: null, awayAtt: null, homeDef: null, awayDef: null }));
+        setNote("Saison qui démarre : classement pas encore publié — forces par défaut. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
+      }
       // xG RÉEL (Understat) prioritaire quand disponible : remplace les forces basées sur les buts.
       try {
         const xr = await fetch("/api/stats?source=understat&league=" + league);
@@ -2739,6 +2751,7 @@ function LiveTab() {
         </div>
         <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois l'app déployée sur Vercel avec <code>FOOTBALLDATA_TOKEN</code> configuré (jeton gratuit sur football-data.org).</span></div>}
+        {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
       {teams.length > 0 && view === "journees" && (<>
         <div className="wc-hint">Tableau des <b>journées à venir</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
@@ -2823,18 +2836,30 @@ function EuropeTab() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const [note, setNote] = useState("");
   const [updated, setUpdated] = useState(null);
   const [leagueAvg, setLeagueAvg] = useState(LEAGUE_GOALS_AVG.CL);
   const [up, setUp] = useState([]);
   const club = useClubLineups(league, true);
   const load = async () => {
-    setLoading(true); setErr(null);
+    setLoading(true); setErr(null); setNote("");
     try {
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
-      if (!d.teams || !d.teams.length) throw new Error("Aucune donnée (phase de ligue pas encore commencée ?)");
-      setTeams(d.teams); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG.CL); setUpdated(new Date());
+      let tm = d.teams || [];
+      // Avant le début de la phase de ligue (tirage fait, matchs pas encore joués),
+      // le classement est vide : on affiche quand même les 36 clubs qualifiés et
+      // les journées via la liste des équipes, avec des forces neutres.
+      if (!tm.length) {
+        const tr = await fetch("/api/stats?source=teams&league=" + league);
+        const td = await tr.json().catch(() => ({}));
+        const clubs = td.teams || [];
+        if (!clubs.length) throw new Error("Aucune donnée (phase de ligue pas encore tirée, ou hors plan gratuit).");
+        tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, position: null, points: null }));
+        setNote("Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces par défaut (classement dès les premiers matchs).");
+      }
+      setTeams(tm); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG.CL); setUpdated(new Date());
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
@@ -2871,6 +2896,7 @@ function EuropeTab() {
         </div>
         <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois déployé sur Vercel avec <code>FOOTBALLDATA_TOKEN</code>. L'Europa League n'est pas incluse dans l'offre gratuite.</span></div>}
+        {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
       {teams.length > 0 && view === "classement" && (
         <section className="pf-card">
