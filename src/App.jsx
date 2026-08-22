@@ -1146,8 +1146,14 @@ function ratingLookup(fr) { return clubRatingByName[normName(fr)] || null; }
  * saison — elle fait disparaître les relégués et apparaître les promus, et reflète
  * les effectifs post-mercato. Cache module : 1 appel par compétition et par session. */
 const clubLiveCache = {};
-async function fetchClubLive(league) {
-  if (clubLiveCache[league]) return clubLiveCache[league];
+async function fetchClubLive(league, force = false) {
+  if (!force && clubLiveCache[league]) return clubLiveCache[league];
+  // Cache persistant (store) : réutilisé au remontage/reload sans réinterroger les
+  // API. Seul un rafraîchissement manuel (force=true) relance les appels.
+  if (!force) {
+    const cached = await store.get("match:live:" + league);
+    if (cached && cached.teams && cached.teams.length) { clubLiveCache[league] = cached; return cached; }
+  }
   const [sr, tr] = await Promise.all([
     fetch("/api/stats?source=footballdata&league=" + league).catch(() => null),
     fetch("/api/stats?source=teams&league=" + league).catch(() => null),
@@ -1174,6 +1180,7 @@ async function fetchClubLive(league) {
   } catch { /* repli silencieux sur les forces basées sur les buts */ }
   const out = { teams, clubs, xgOn, leagueAvg: d.leagueAvg };
   clubLiveCache[league] = out;
+  await store.set("match:live:" + league, out);
   return out;
 }
 /* Construit la liste d'équipes affichée dans l'onglet Match à partir des données
@@ -1229,30 +1236,37 @@ function blendWithReference(league, t) {
 /* Calendrier (résultats + prochains matchs avec dates) d'une compétition.
  * Cache module : 1 appel par compétition et par session (le proxy cache au bord). */
 const clubFixturesCache = {};
-async function fetchLeagueFixtures(league) {
+async function fetchLeagueFixtures(league, force = false) {
   if (!league) return { finished: [], upcoming: [] };
-  if (clubFixturesCache[league]) return clubFixturesCache[league];
+  if (!force && clubFixturesCache[league]) return clubFixturesCache[league];
+  if (!force) {
+    const cached = await store.get("match:fix:" + league);
+    if (cached && (cached.finished || cached.upcoming)) { clubFixturesCache[league] = cached; return cached; }
+  }
   const r = await fetch("/api/stats?source=matches&league=" + league + "&all=1");
   if (!r.ok) throw new Error("HTTP " + r.status);
   const d = await r.json();
   const out = { finished: d.finished || [], upcoming: d.upcoming || [] };
   clubFixturesCache[league] = out;
+  await store.set("match:fix:" + league, out);
   return out;
 }
-function useLeagueFixtures(league) {
+function useLeagueFixtures(league, nonce = 0) {
   const [data, setData] = useState({ finished: [], upcoming: [] });
   useEffect(() => {
     if (!league) { setData({ finished: [], upcoming: [] }); return; }
     let on = true;
+    // nonce bumpé par un rafraîchissement manuel : le cache module/store a déjà été
+    // réécrit en amont (fetchLeagueFixtures force=true), on relit simplement.
     fetchLeagueFixtures(league).then((d) => { if (on) setData(d); }).catch(() => { if (on) setData({ finished: [], upcoming: [] }); });
     return () => { on = false; };
-  }, [league]);
+  }, [league, nonce]);
   return data;
 }
 /* Bandeau « prochaine confrontation » : cherche dans le calendrier de la saison le
  * prochain match réel entre les deux clubs sélectionnés et affiche sa date. */
-function NextFixtureBanner({ league, home, away }) {
-  const { upcoming } = useLeagueFixtures(league);
+function NextFixtureBanner({ league, home, away, nonce = 0 }) {
+  const { upcoming } = useLeagueFixtures(league, nonce);
   if (!league || !home || !away) return null;
   const hn = normName(home.n), an = normName(away.n);
   const fix = (upcoming || []).find((m) => {
@@ -1266,9 +1280,9 @@ function NextFixtureBanner({ league, home, away }) {
 }
 /* Calendrier repliable des prochaines journées du championnat (ou de la C1 en mode
  * Europe), avec dates et pronostic express 1/N/2 tiré des forces de la saison. */
-function MatchCalendar({ league, pool, leagueAvg, rho, club }) {
+function MatchCalendar({ league, pool, leagueAvg, rho, club, nonce = 0 }) {
   const [open, setOpen] = useState(false);
-  const { upcoming } = useLeagueFixtures(league);
+  const { upcoming } = useLeagueFixtures(league, nonce);
   const journees = useMemo(() => {
     const byMd = {};
     (upcoming || []).forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
@@ -1352,6 +1366,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
   // cours via le proxy (relégués retirés, promus ajoutés, effectifs post-mercato).
   const [liveClub, setLiveClub] = useState({});
   const [liveState, setLiveState] = useState("");
+  const [fixNonce, setFixNonce] = useState(0); // bumpé au rafraîchissement manuel
   useEffect(() => {
     if (!liveLeagueCode) return;
     if (liveClub[liveLeagueCode]) { setLiveState("ok"); return; }
@@ -1376,6 +1391,19 @@ function MatchTab({ intlMatches = [], matchRequest }) {
   const rho = scope === "intl" ? LEAGUE_RHO.WC : euro ? (LEAGUE_RHO.CL || RHO) : (LEAGUE_RHO[clubLeague] || RHO);
   // Compositions de clubs (effectifs + compo live/saisie/dernière connue), actives en National et Europe.
   const club = useClubLineups(compLeague, scope !== "intl");
+  // Rafraîchissement MANUEL (bouton ↻) : force le rechargement des forces live, du
+  // calendrier et des effectifs, et réécrit les caches persistants. Hors de là, tout
+  // vient du cache (pas d'appel API à chaque navigation -> quota préservé).
+  const refreshMatch = async () => {
+    const lg = liveLeagueCode;
+    if (!lg) return;
+    setLiveState("loading");
+    try { const d = await fetchClubLive(lg, true); setLiveClub((p) => ({ ...p, [lg]: d })); setLiveState("ok"); }
+    catch { setLiveState("err"); }
+    try { await fetchLeagueFixtures(compLeague, true); } catch { /* calendrier indisponible */ }
+    club.reloadRoster();
+    setFixNonce((n) => n + 1);
+  };
   const home = pool[h] || pool[0], away = pool[a] || pool[1] || pool[0], same = h === a || !home || !away;
   const luKey = scope !== "intl" && !same ? lineupKey(home.n, away.n) : null;
   const luM = luKey ? club.lineups[luKey] : null;
@@ -1455,11 +1483,14 @@ function MatchTab({ intlMatches = [], matchRequest }) {
         )}
         {euro && <div className="lv-meta">⭐ Coupes d'Europe — Ligue des Champions (C1) recalibrée en direct ; Europa League (C3) sur forces de référence. Formation/compo intégrées comme en National.</div>}
         {scope !== "intl" && (
-          <div className="lv-meta">
-            {liveState === "loading" ? "Chargement des clubs et forces de la saison en cours…"
-              : liveState === "ok" ? "✓ " + pool.filter((t) => t.live).length + "/" + pool.length + " clubs recalibrés en direct · " + pool.length + " clubs listés · " + (liveInfo && liveInfo.xgOn ? "xG réel (Understat)" : "buts réels") + " + forme récente"
-              : liveState === "err" ? "Live indisponible — liste et ratings de référence (proxy /api/stats + FOOTBALLDATA_TOKEN requis)"
-              : ""}
+          <div className="lv-ctrl">
+            <div className="lv-meta" style={{ flex: 1 }}>
+              {liveState === "loading" ? "Chargement des clubs et forces de la saison en cours…"
+                : liveState === "ok" ? "✓ " + pool.filter((t) => t.live).length + "/" + pool.length + " clubs recalibrés (cache) · " + (liveInfo && liveInfo.xgOn ? "xG réel (Understat)" : "buts réels") + " + forme · ↻ pour actualiser"
+                : liveState === "err" ? "Live indisponible — liste et ratings de référence (proxy /api/stats + FOOTBALLDATA_TOKEN requis)"
+                : "En cache · ↻ pour actualiser"}
+            </div>
+            <button className="lv-refresh" onClick={refreshMatch} disabled={liveState === "loading"} title="Mettre à jour depuis les API (rafraîchit le cache)">{liveState === "loading" ? "…" : "↻"}</button>
           </div>
         )}
         <TeamSelect label="DOMICILE" value={h} onChange={setH} pool={pool} />
@@ -1467,7 +1498,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
         <TeamSelect label="EXTÉRIEUR" value={a} onChange={setA} pool={pool} />
         <label className="pf-neutral"><input type="checkbox" checked={neutral} onChange={(e) => setNeutral(e.target.checked)} /><span>Terrain neutre (tournoi)</span></label>
       </section>
-      {scope !== "intl" && !same && <NextFixtureBanner league={liveLeagueCode} home={home} away={away} />}
+      {scope !== "intl" && !same && <NextFixtureBanner league={liveLeagueCode} home={home} away={away} nonce={fixNonce} />}
       {scope !== "intl" && !same && (
         <section className="pf-card">
           <div className="pf-result-head">Forme — 5 derniers matchs (V/N/D)</div>
@@ -1494,7 +1525,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
           <div className="lv-meta">Compo officielle (live) via 🔴, ou saisie à la main (liste des joueurs de l'effectif + formations). Elle est intégrée au pronostic ci-dessus.</div>
         </section>
       )}
-      {scope !== "intl" && <MatchCalendar league={liveLeagueCode} pool={pool} leagueAvg={leagueAvg} rho={rho} club={club} />}
+      {scope !== "intl" && <MatchCalendar league={liveLeagueCode} pool={pool} leagueAvg={leagueAvg} rho={rho} club={club} nonce={fixNonce} />}
       {same && <div className="pf-warn">Choisis deux équipes différentes.</div>}
       {R && (homeRisk > 0 || awayRisk > 0) && <div className="pf-risk-badge">⚡ Contexte Mondial : {[homeRisk > 0 ? home.n : null, awayRisk > 0 ? away.n : null].filter(Boolean).join(" & ")} en quête de points — prise de risque intégrée au pronostic</div>}
       {R && R.h2hN > 0 && <div className="pf-h2h-badge">🔁 {R.h2hN} confrontation{R.h2hN > 1 ? "s" : ""} directe{R.h2hN > 1 ? "s" : ""} prise{R.h2hN > 1 ? "s" : ""} en compte</div>}
@@ -2542,11 +2573,19 @@ function useClubLineups(league, active) {
   useEffect(() => { if (persistLoaded) store.set("club:lastcomp:v1", lastComp); }, [lastComp, persistLoaded]);
   const onCompChange = (name, patch) => setComp((p) => ({ ...p, [name]: { ...(p[name] || {}), ...patch } }));
   const onCompReset = (name) => setComp((p) => { const n = { ...p }; delete n[name]; return n; });
+  // Rafraîchissement manuel des effectifs : vide le cache de la ligue puis relance.
+  const [rosterNonce, setRosterNonce] = useState(0);
+  const reloadRoster = async () => { await store.set("club:roster:" + league, null); setRosterNonce((n) => n + 1); };
   // Effectif réel de tous les clubs du championnat (squad + buts/passes).
+  // Mis en cache par ligue : on ne réinterroge teams+scorers que si le cache est
+  // vide (1re fois) ou après un reloadRoster manuel -> économise le quota.
   useEffect(() => {
     if (!active) return;
-    let on = true; setRoster({});
+    let on = true;
     (async () => {
+      const cached = await store.get("club:roster:" + league);
+      if (cached && Object.keys(cached).length) { if (on) setRoster(cached); return; }
+      setRoster({});
       try {
         const [tr, sr] = await Promise.all([
           fetch("/api/stats?source=teams&league=" + league),
@@ -2565,10 +2604,11 @@ function useClubLineups(league, active) {
           if (players.length) out[fr] = players;
         });
         if (on) setRoster(out);
+        if (Object.keys(out).length) await store.set("club:roster:" + league, out);
       } catch { /* effectifs indisponibles : saisie manuelle possible */ }
     })();
     return () => { on = false; };
-  }, [league, active]);
+  }, [league, active, rosterNonce]);
   // Compo officielle (live) d'une affiche : la mémorise comme dernière compo connue.
   const loadLineup = async (frH, frA) => {
     const k = lineupKey(frH, frA);
@@ -2587,7 +2627,7 @@ function useClubLineups(league, active) {
       });
     } catch { setLineups((p) => ({ ...p, [k]: { state: "err" } })); }
   };
-  return { roster, lineups, comp, lastComp, onCompChange, onCompReset, loadLineup };
+  return { roster, lineups, comp, lastComp, onCompChange, onCompReset, loadLineup, reloadRoster };
 }
 /* Carte d'un match de championnat : pronostic 1/N/2 (forces live + forme +
  * compo/formation) + panneau de composition (comme le Mondial). La compo suit la
@@ -2676,9 +2716,34 @@ function LiveTab() {
   const [updated, setUpdated] = useState(null);
   const [xgOn, setXgOn] = useState(false);
   const [leagueAvg, setLeagueAvg] = useState(BASE_GOALS);
-  const load = async () => {
-    setLoading(true); setErr(null); setNote("");
+  const [h2h, setH2h] = useState([]);
+  const [h2hMsg, setH2hMsg] = useState("");
+  const [fin, setFin] = useState([]);
+  const [up, setUp] = useState([]);
+  const [odds, setOdds] = useState([]);
+  const [oddsNote, setOddsNote] = useState("");
+  const load = async (force = false) => {
+    setErr(null);
+    // Cache local : on réutilise le DERNIER résultat connu. Les API (football-data
+    // plafonné à 10 req/min) ne sont réinterrogées QUE si le cache est vide (1er
+    // affichage de la ligue) ou sur action manuelle (bouton ↻ -> force=true). Avant,
+    // chaque changement d'onglet/de ligue + un timer 10 min rechargeaient tout
+    // (standings + teams + understat + scorers + matches + cotes) et explosaient le
+    // quota -> 429 -> données vides (ex. La Liga sans pronostics).
+    if (!force) {
+      const c = await store.get("live:data:" + league);
+      if (c && c.teams && c.teams.length) {
+        setTeams(c.teams); setLeagueAvg(c.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS);
+        setXgOn(!!c.xgOn); setUp(c.upcoming || []); setFin(c.finished || []);
+        setOdds(c.odds || []); setOddsNote(c.oddsNote || "");
+        setNote(c.note || ""); setUpdated(c.updated ? new Date(c.updated) : new Date());
+        setA(0); setB(Math.min(1, c.teams.length - 1));
+        return;
+      }
+    }
+    setLoading(true); setNote("");
     setLeagueAvg(LEAGUE_GOALS_AVG[league] || BASE_GOALS);
+    let noteText = "";
     try {
       // pas de paramètre season -> football-data.org renvoie la saison EN COURS
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
@@ -2704,7 +2769,7 @@ function LiveTab() {
           .map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, homeAtt: null, awayAtt: null, homeDef: null, awayDef: null }));
         if (missing.length) tm = tm.concat(missing);
         if (!tm.length) throw new Error("Aucune donnée (championnat hors du plan gratuit football-data.org ?)");
-        if (!d.teams?.length) setNote("Saison qui démarre : classement pas encore publié — forces de référence des clubs. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).");
+        if (!d.teams?.length) noteText = "Saison qui démarre : classement pas encore publié — forces de référence des clubs. Journées, compositions et pronostics restent affichés (ils s'affineront après les premiers matchs).";
       }
       // xG RÉEL (Understat) prioritaire quand disponible : remplace les forces basées sur les buts.
       try {
@@ -2728,21 +2793,28 @@ function LiveTab() {
       // Fusion avec la fiche de référence (Elo + forces) : mêmes forces que
       // l'onglet Match -> probabilités cohérentes entre les onglets.
       tm = tm.map((t) => blendWithReference(league, t));
-      setTeams(tm); setXgOn(xgActive); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
+      // Calendrier complet (journées) + cotes chargés ICI pour être mis en cache
+      // AVEC les forces : une seule salve d'appels par rafraîchissement manuel.
+      let upcoming = [], finished = [];
+      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
+      let oddsEv = [], oddsN = "";
+      try { const or = await fetch("/api/stats?source=odds&league=" + league); const od = await or.json(); oddsEv = od.events || []; if (!oddsEv.length) oddsN = od.note || ""; } catch { oddsN = "Cotes indisponibles."; }
+      const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS;
+      setTeams(tm); setXgOn(xgActive); setLeagueAvg(leagueAvgV); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
+      setUp(upcoming); setFin(finished); setOdds(oddsEv); setOddsNote(oddsN); if (noteText) setNote(noteText);
+      await store.set("live:data:" + league, { teams: tm, leagueAvg: leagueAvgV, xgOn: xgActive, upcoming, finished, odds: oddsEv, oddsNote: oddsN, note: noteText, updated: new Date().toISOString() });
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, [league]);
-  useEffect(() => { if (!teams.length) return; const t = setInterval(load, 600000); return () => clearInterval(t); }, [teams.length, league]);
-  const [h2h, setH2h] = useState([]);
-  const [h2hMsg, setH2hMsg] = useState("");
-  const [fin, setFin] = useState([]);
-  const [up, setUp] = useState([]);
-  const [odds, setOdds] = useState([]);
-  const [oddsNote, setOddsNote] = useState("");
+  // Au changement de ligue : hydrate depuis le cache (aucun appel API). Le premier
+  // affichage d'une ligue jamais chargée déclenche UN chargement, ensuite tout vient
+  // du cache jusqu'au prochain ↻ manuel. Plus d'auto-refresh périodique (quota).
+  useEffect(() => { load(false); }, [league]);
   // Effectifs réels + compo saisie / officielle live / dernière connue (socle
   // commun avec l'onglet Match, partagé via le store).
-  const { roster, lineups, comp, lastComp, onCompChange, onCompReset, loadLineup } = useClubLineups(league, true);
+  const { roster, lineups, comp, lastComp, onCompChange, onCompReset, loadLineup, reloadRoster } = useClubLineups(league, true);
+  // Rafraîchissement MANUEL complet : forces + calendrier + cotes + effectifs.
+  const refreshAll = () => { load(true); reloadRoster(); };
   const ta = teams[a], tb = teams[b];
   // Équipe « effective » pour TOUT calcul de cet onglet : forme parsée + facteur
   // composition/formation (saisie > compo officielle live > dernière connue >
@@ -2761,30 +2833,17 @@ function LiveTab() {
     ? predictWithHistory(effClub(ta, analyseLuOk ? analyseLu.home : null), effClub(tb, analyseLuOk ? analyseLu.away : null), h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
     : null;
   const R = hist ? hist.R : null;
+  // Confrontations directes : seulement en vue « analyse » (un match sélectionné)
+  // et une fois par paire, pour ne pas consommer de quota sur la vue Journées.
   useEffect(() => {
-    if (!ta || !tb || a === b || !ta.id || !tb.id) { setH2h([]); setH2hMsg(""); return; }
+    if (view !== "analyse" || !ta || !tb || a === b || !ta.id || !tb.id) { setH2h([]); setH2hMsg(""); return; }
     let on = true; setH2hMsg("Chargement…"); setH2h([]);
     fetch("/api/stats?source=h2h&home=" + ta.id + "&away=" + tb.id)
       .then((r) => r.json())
       .then((d) => { if (!on) return; const m = d.meetings || []; setH2h(m); setH2hMsg(m.length ? "" : "Aucune confrontation récente trouvée."); })
       .catch(() => { if (on) setH2hMsg("Confrontations indisponibles (déploie le proxy)."); });
     return () => { on = false; };
-  }, [ta && ta.id, tb && tb.id]);
-  useEffect(() => {
-    let on = true; setFin([]); setUp([]);
-    // all=1 : calendrier COMPLET de la saison -> regroupement par journée.
-    fetch("/api/stats?source=matches&league=" + league + "&all=1")
-      .then((r) => r.json()).then((d) => { if (!on) return; setFin(d.finished || []); setUp(d.upcoming || []); })
-      .catch(() => {});
-    return () => { on = false; };
-  }, [league]);
-  useEffect(() => {
-    let on = true; setOdds([]); setOddsNote("");
-    fetch("/api/stats?source=odds&league=" + league)
-      .then((r) => r.json()).then((d) => { if (!on) return; setOdds(d.events || []); if (!(d.events || []).length) setOddsNote(d.note || ""); })
-      .catch(() => { if (on) setOddsNote("Cotes indisponibles."); });
-    return () => { on = false; };
-  }, [league]);
+  }, [view, ta && ta.id, tb && tb.id]);
   const byId = (id) => teams.find((t) => t.id === id);
   const byName = (n) => teams.find((t) => normName(t.name) === normName(n));
   const teamById = (id) => byId(id);
@@ -2828,14 +2887,14 @@ function LiveTab() {
         <div className="pf-result-head"><Radio size={15} /> Championnats nationaux — saison en cours</div>
         <div className="lv-ctrl">
           <select value={league} onChange={(e) => setLeague(e.target.value)}>{LIVE_LEAGUES.map((l) => <option key={l.code} value={l.code}>{l.n}</option>)}</select>
-          <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
+          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title="Mettre à jour depuis les API (rafraîchit le cache)">{loading ? "…" : "↻"}</button>
         </div>
         <div className="wc-subnav" style={{ marginTop: 8 }}>
           <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Layers size={15} /> Journées</button>
           <button className={view === "classement" ? "wc-sb on" : "wc-sb"} onClick={() => setView("classement")}><Trophy size={15} /> Classement</button>
           <button className={view === "analyse" ? "wc-sb on" : "wc-sb"} onClick={() => setView("analyse")}><Target size={15} /> Match & cotes</button>
         </div>
-        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
+        <div className="lv-meta">{updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois l'app déployée sur Vercel avec <code>FOOTBALLDATA_TOKEN</code> configuré (jeton gratuit sur football-data.org).</span></div>}
         {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
@@ -2984,39 +3043,52 @@ function EuropeTab() {
   const [leagueAvg, setLeagueAvg] = useState(LEAGUE_GOALS_AVG.CL);
   const [up, setUp] = useState([]);
   const club = useClubLineups(league, true);
-  const load = async () => {
-    setLoading(true); setErr(null); setNote("");
+  // Cache local (même principe que l'onglet National) : hydrate depuis le dernier
+  // résultat, ne réinterroge les API que si cache vide ou ↻ manuel. Clé distincte
+  // `europe:data:CL` pour ne pas entrer en collision avec le cache National (où la
+  // C1 peut aussi être sélectionnée sous la clé `live:data:CL`).
+  const load = async (force = false) => {
+    setErr(null);
+    if (!force) {
+      const c = await store.get("europe:data:" + league);
+      if (c && c.teams && c.teams.length) {
+        setTeams(c.teams); setLeagueAvg(c.leagueAvg || LEAGUE_GOALS_AVG.CL);
+        setUp(c.upcoming || []); setNote(c.note || ""); setUpdated(c.updated ? new Date(c.updated) : new Date());
+        return;
+      }
+    }
+    setLoading(true); setNote("");
+    let noteText = "";
     try {
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
       const d = await r.json();
       let tm = d.teams || [];
-      // Avant le début de la phase de ligue (tirage fait, matchs pas encore joués),
-      // le classement est vide : on affiche quand même les 36 clubs qualifiés et
-      // les journées via la liste des équipes, avec des forces neutres.
-      if (!tm.length) {
+      // Complète la liste avec TOUS les clubs qualifiés (union), forces neutres pour
+      // ceux hors classement (avant/début de phase de ligue) -> les 36 clubs et
+      // toutes les journées restent pronostiqués (même logique que le National).
+      {
         const tr = await fetch("/api/stats?source=teams&league=" + league);
         const td = await tr.json().catch(() => ({}));
         const clubs = td.teams || [];
-        if (!clubs.length) throw new Error("Aucune donnée (phase de ligue pas encore tirée, ou hors plan gratuit).");
-        tm = clubs.map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, position: null, points: null }));
-        setNote("Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces de référence (classement dès les premiers matchs).");
+        const have = new Set(tm.map((t) => t.id));
+        const missing = clubs.filter((t) => !have.has(t.id)).map((t) => ({ id: t.id, name: t.name, crest: t.crest, matches: 0, att: 1, def: 1, form: "", goalsFor: 0, goalsAgainst: 0, position: null, points: null }));
+        if (missing.length) tm = tm.concat(missing);
+        if (!tm.length) throw new Error("Aucune donnée (phase de ligue pas encore tirée, ou hors plan gratuit).");
+        if (!d.teams?.length) noteText = "Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces de référence (classement dès les premiers matchs).";
       }
       // Même fusion forces de référence + Elo que l'onglet Match / National.
       tm = tm.map((t) => blendWithReference("CL", t));
-      setTeams(tm); setLeagueAvg(d.leagueAvg || LEAGUE_GOALS_AVG.CL); setUpdated(new Date());
+      let upcoming = [];
+      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; } catch { /* calendrier indisponible */ }
+      const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG.CL;
+      setTeams(tm); setLeagueAvg(leagueAvgV); setUp(upcoming); setUpdated(new Date()); if (noteText) setNote(noteText);
+      await store.set("europe:data:" + league, { teams: tm, leagueAvg: leagueAvgV, upcoming, note: noteText, updated: new Date().toISOString() });
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
-  useEffect(() => { if (!teams.length) return; const t = setInterval(load, 600000); return () => clearInterval(t); }, [teams.length]);
-  useEffect(() => {
-    let on = true; setUp([]);
-    fetch("/api/stats?source=matches&league=" + league + "&all=1")
-      .then((r) => r.json()).then((d) => { if (!on) return; setUp(d.upcoming || []); })
-      .catch(() => {});
-    return () => { on = false; };
-  }, []);
+  useEffect(() => { load(false); }, []);
+  const refreshAll = () => { load(true); club.reloadRoster(); };
   const byId = (id) => teams.find((t) => t.id === id);
   const rho = LEAGUE_RHO.CL || RHO;
   const journees = useMemo(() => {
@@ -3033,13 +3105,13 @@ function EuropeTab() {
         <div className="pf-result-head"><Trophy size={15} /> Ligue des Champions — phase de ligue</div>
         <div className="lv-ctrl">
           <div className="lv-meta" style={{ flex: 1 }}>Format 2025-26 : 36 équipes, un seul classement (8 matchs). 1–8 → 8es directs · 9–24 → barrages · 25–36 → éliminés.</div>
-          <button className="lv-refresh" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
+          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title="Mettre à jour depuis les API (rafraîchit le cache)">{loading ? "…" : "↻"}</button>
         </div>
         <div className="wc-subnav" style={{ marginTop: 8 }}>
           <button className={view === "classement" ? "wc-sb on" : "wc-sb"} onClick={() => setView("classement")}><Layers size={15} /> Classement</button>
           <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Target size={15} /> Journées</button>
         </div>
-        <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
+        <div className="lv-meta">{updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois déployé sur Vercel avec <code>FOOTBALLDATA_TOKEN</code>. L'Europa League n'est pas incluse dans l'offre gratuite.</span></div>}
         {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
