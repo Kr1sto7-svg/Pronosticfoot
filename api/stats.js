@@ -17,6 +17,12 @@ export default async function handler(req, res) {
   const H = { "X-Auth-Token": token || "" };
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
+  // football-data.org = 10 req/min en gratuit. Sur 429 (limite) / erreur amont /
+  // données vides, on RACCOURCIT le cache pour ne pas figer un vide pendant 10 min.
+  const shortCache = () => res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=60");
+  const upstreamErr = (r) => r.status === 429
+    ? "Limite football-data.org atteinte (10 requêtes/min en gratuit) — réessaie dans quelques secondes."
+    : ("football-data.org a répondu HTTP " + r.status);
 
   /* ---- xG RÉEL via Understat (gratuit, sans clé) : 5 grands championnats ---- */
   /* NB : Understat n'expose pas d'API officielle (JSON intégré au HTML) et ne
@@ -339,7 +345,9 @@ export default async function handler(req, res) {
     if (source === "scorers") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
       const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/scorers?limit=100", { headers: H });
+      if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
       const j = await r.json();
+      if (!(j.scorers || []).length) shortCache();
       const players = (j.scorers || []).map((s) => ({
         name: s.player?.name,
         team: s.team?.name,
@@ -423,12 +431,14 @@ export default async function handler(req, res) {
     if (source === "teams") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
       const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/teams", { headers: H });
+      if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
       const j = await r.json();
       const teams = (j.teams || []).map((t) => ({
         // name = nom court (affichage) ; fullName = nom complet (meilleure correspondance FR).
         id: t.id, name: t.shortName || t.name, fullName: t.name, shortName: t.shortName || "", crest: t.crest,
         squad: (t.squad || []).map((p) => ({ name: p.name, position: p.position || "", nationality: p.nationality || "", dob: p.dateOfBirth || "" })),
       }));
+      if (!teams.length) shortCache();
       return res.status(200).json({ source, league, count: teams.length, teams });
     }
 
@@ -436,8 +446,10 @@ export default async function handler(req, res) {
     if (source === "matches") {
       if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
       const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/matches", { headers: H });
+      if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
       const j = await r.json();
       const all = j.matches || [];
+      if (!all.length) shortCache();
       const map = (m) => ({
         id: m.id, date: m.utcDate, status: m.status, matchday: m.matchday,
         // stage = tour (GROUP_STAGE, LAST_32, LAST_16, QUARTER_FINALS, SEMI_FINALS, FINAL…)
@@ -491,6 +503,7 @@ export default async function handler(req, res) {
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
     if (!league) return res.status(400).json({ error: "paramètre 'league' requis" });
     const r = await fetch("https://api.football-data.org/v4/competitions/" + league + "/standings", { headers: H });
+    if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
     const j = await r.json();
     const table = (j.standings || []).find((s) => s.type === "TOTAL")?.table || [];
     const homeTable = (j.standings || []).find((s) => s.type === "HOME")?.table || [];
@@ -520,7 +533,7 @@ export default async function handler(req, res) {
         awayGoalsAgainst: a?.goalsAgainst || 0,
       };
     }).filter((t) => t.matches > 0);
-    if (!rows.length) return res.status(200).json({ source: "standings", league, teams: [] });
+    if (!rows.length) { shortCache(); return res.status(200).json({ source: "standings", league, teams: [] }); }
     const totM = rows.reduce((s, t) => s + t.matches, 0);
     const totG = rows.reduce((s, t) => s + t.goalsFor, 0);
     const leagueAvg = totM ? totG / totM : 1.35;
