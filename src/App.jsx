@@ -2766,7 +2766,7 @@ function LiveTab() {
           <div className="pf-result-head"><Trophy size={15} /> Classement — {(LIVE_LEAGUES.find((l) => l.code === league) || {}).n || league}</div>
           <div className="wc-tbl-wrap">
             <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>V</th><th>N</th><th>D</th><th>+/-</th><th>Pts</th><th className="lv-hide-sm">Forme</th></tr></thead>
-              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = league === "CL" ? clZone(pos) : null; return (
+              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = league === "CL" ? clZone(pos) : leagueZone(league, pos); return (
                 <tr key={t.id} className={(isLyon(t.name) ? "nat-lyon-row " : "") + (z ? z.c : "")}>
                   <td>{pos}</td>
                   <td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td>
@@ -2785,7 +2785,14 @@ function LiveTab() {
             <span className="cl-lg cl-z2">barrages (9–24)</span>
             <span className="cl-lg cl-z3">éliminés (25–36)</span>
           </div>}
-          <div className="lv-meta">Classement officiel de la saison en cours (source football-data.org). ⭐ Lyon surligné.</div>
+          {LEAGUE_ZONES[league] && <div className="cl-legend lz-legend">
+            <span className="lz-lg"><i className="lz-dot lz-d-ucl" />Ligue des Champions</span>
+            <span className="lz-lg"><i className="lz-dot lz-d-uel" />Ligue Europa</span>
+            <span className="lz-lg"><i className="lz-dot lz-d-uecl" />Ligue Conférence</span>
+            {LEAGUE_ZONES[league].relegPO && <span className="lz-lg"><i className="lz-dot lz-d-relpo" />Barrage</span>}
+            <span className="lz-lg"><i className="lz-dot lz-d-rel" />Relégation</span>
+          </div>}
+          <div className="lv-meta">Classement officiel de la saison en cours (source football-data.org). ⭐ Lyon surligné.{LEAGUE_ZONES[league] ? " Zones européennes/relégation indicatives (varient selon coefficients UEFA & coupes)." : ""}</div>
         </section>
       )}
       {teams.length > 0 && view === "journees" && (<>
@@ -2864,6 +2871,29 @@ function clZone(pos) {
   if (pos <= 8) return { c: "cl-z1", t: "8es directs" };
   if (pos <= 24) return { c: "cl-z2", t: "barrages" };
   return { c: "cl-z3", t: "éliminé" };
+}
+/* Zones européennes / relégation par championnat national (INDICATIF : les places
+ * réelles varient selon les coefficients UEFA et les vainqueurs de coupe).
+ * ucl/uel/uecl = dernière position de la zone (depuis le haut) ; relegPO = barrage
+ * (position unique) ; relegFrom = 1re position de relégation directe (jusqu'en bas). */
+const LEAGUE_ZONES = {
+  FL1: { ucl: 3, uel: 4, uecl: 5, relegPO: 16, relegFrom: 17 }, // 18 clubs
+  PL:  { ucl: 5, uel: 6, uecl: 7, relegFrom: 18 },              // 20 clubs
+  PD:  { ucl: 5, uel: 6, uecl: 7, relegFrom: 18 },              // 20 clubs
+  SA:  { ucl: 4, uel: 6, uecl: 7, relegFrom: 18 },              // 20 clubs
+  BL1: { ucl: 4, uel: 5, uecl: 6, relegPO: 16, relegFrom: 17 }, // 18 clubs
+  PPL: { ucl: 2, uel: 3, uecl: 4, relegFrom: 17 },              // 18 clubs
+  DED: { ucl: 2, uel: 3, uecl: 4, relegPO: 16, relegFrom: 17 }, // 18 clubs
+};
+function leagueZone(league, pos) {
+  const z = LEAGUE_ZONES[league];
+  if (!z || !pos) return null;
+  if (pos <= z.ucl) return { c: "lz-ucl", t: "Ligue des Champions" };
+  if (pos <= z.uel) return { c: "lz-uel", t: "Ligue Europa" };
+  if (z.uecl && pos <= z.uecl) return { c: "lz-uecl", t: "Ligue Conférence" };
+  if (z.relegFrom && pos >= z.relegFrom) return { c: "lz-rel", t: "Relégation" };
+  if (z.relegPO && pos === z.relegPO) return { c: "lz-relpo", t: "Barrage" };
+  return null;
 }
 function EuropeTab() {
   const league = "CL";
@@ -3590,6 +3620,19 @@ const CSS = `
 .cl-lg.cl-z1{background:rgba(200,255,66,.14);color:var(--lime);box-shadow:none;}
 .cl-lg.cl-z2{background:rgba(255,186,58,.14);color:var(--amber);box-shadow:none;}
 .cl-lg.cl-z3{background:#1b1f25;color:var(--dim);opacity:1;}
+.lz-ucl td:first-child{box-shadow:inset 4px 0 0 var(--lime);}
+.lz-uel td:first-child{box-shadow:inset 4px 0 0 #58a6ff;}
+.lz-uecl td:first-child{box-shadow:inset 4px 0 0 #39d3c3;}
+.lz-relpo td:first-child{box-shadow:inset 4px 0 0 var(--amber);}
+.lz-rel td:first-child{box-shadow:inset 4px 0 0 #ff6b6b;}
+.lz-legend{margin-top:10px;}
+.lz-lg{font-size:10.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;color:var(--dim);}
+.lz-dot{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none;}
+.lz-d-ucl{background:var(--lime);}
+.lz-d-uel{background:#58a6ff;}
+.lz-d-uecl{background:#39d3c3;}
+.lz-d-relpo{background:var(--amber);}
+.lz-d-rel{background:#ff6b6b;}
 .sc-team{width:100%;background:#0e1116;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px;font-size:13px;margin-bottom:8px;}
 .sq-team-block{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--line);}
 .sq-team-block:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
