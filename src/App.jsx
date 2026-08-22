@@ -2448,14 +2448,14 @@ const LIVE_LEAGUES = [
 ];
 /* Pour l'onglet Buteurs : clubs + sélections nationales (football-data.org). */
 const SCORER_LEAGUES = [
-  { code: "WC", n: "Coupe du Monde 2026 🌍" },
-  { code: "EC", n: "Euro (sélections) 🇪🇺" },
   { code: "FL1", n: "Ligue 1 🇫🇷" },
   { code: "PL", n: "Premier League 🏴" },
   { code: "PD", n: "La Liga 🇪🇸" },
   { code: "SA", n: "Serie A 🇮🇹" },
   { code: "BL1", n: "Bundesliga 🇩🇪" },
   { code: "CL", n: "Ligue des Champions 🏆" },
+  { code: "EC", n: "Euro (sélections) 🇪🇺" },
+  { code: "WC", n: "Coupe du Monde 2026 🌍" },
 ];
 /* Équipe favorite mise en avant dans l'onglet National (Lyon). */
 const isLyon = (name) => normName(name).includes("lyon");
@@ -2717,6 +2717,13 @@ function LiveTab() {
     return Object.keys(byMd).map(Number).sort((x, y) => x - y)
       .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
   }, [up]);
+  // Classement live : tri officiel (rang API, sinon pts / diff / BP).
+  const ranked = useMemo(() => teams.slice().sort((a, b) =>
+    (a.position || 99) - (b.position || 99)
+    || (b.points || 0) - (a.points || 0)
+    || (b.goalDifference || 0) - (a.goalDifference || 0)
+    || (b.goalsFor || 0) - (a.goalsFor || 0)
+  ), [teams]);
   const rho = LEAGUE_RHO[league] || RHO;
   const cardProps = { league, teamById, leagueAvg, rho, roster, comp, lastComp, lineups, onCompChange, onCompReset, onRefresh: loadLineup };
   const fixtureProbs = (m) => {
@@ -2747,12 +2754,40 @@ function LiveTab() {
         </div>
         <div className="wc-subnav" style={{ marginTop: 8 }}>
           <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Layers size={15} /> Journées</button>
+          <button className={view === "classement" ? "wc-sb on" : "wc-sb"} onClick={() => setView("classement")}><Trophy size={15} /> Classement</button>
           <button className={view === "analyse" ? "wc-sb on" : "wc-sb"} onClick={() => setView("analyse")}><Target size={15} /> Match & cotes</button>
         </div>
         <div className="lv-meta">{updated ? "MAJ " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · saison en cours · cache 10 min" : "Chargement…"}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois l'app déployée sur Vercel avec <code>FOOTBALLDATA_TOKEN</code> configuré (jeton gratuit sur football-data.org).</span></div>}
         {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
+      {teams.length > 0 && view === "classement" && (
+        <section className="pf-card">
+          <div className="pf-result-head"><Trophy size={15} /> Classement — {(LIVE_LEAGUES.find((l) => l.code === league) || {}).n || league}</div>
+          <div className="wc-tbl-wrap">
+            <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>V</th><th>N</th><th>D</th><th>+/-</th><th>Pts</th><th className="lv-hide-sm">Forme</th></tr></thead>
+              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = league === "CL" ? clZone(pos) : null; return (
+                <tr key={t.id} className={(isLyon(t.name) ? "nat-lyon-row " : "") + (z ? z.c : "")}>
+                  <td>{pos}</td>
+                  <td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td>
+                  <td>{t.matches}</td>
+                  <td>{t.won != null ? t.won : "—"}</td>
+                  <td>{t.draw != null ? t.draw : "—"}</td>
+                  <td>{t.lost != null ? t.lost : "—"}</td>
+                  <td>{t.goalDifference != null ? (t.goalDifference > 0 ? "+" : "") + t.goalDifference : "—"}</td>
+                  <td className="wc-pts">{t.points != null ? t.points : "—"}</td>
+                  <td className="lv-hide-sm">{t.form ? <FormPills form={parseForm(t.form)} /> : "—"}</td>
+                </tr>); })}</tbody>
+            </table>
+          </div>
+          {league === "CL" && <div className="cl-legend">
+            <span className="cl-lg cl-z1">8es directs (1–8)</span>
+            <span className="cl-lg cl-z2">barrages (9–24)</span>
+            <span className="cl-lg cl-z3">éliminés (25–36)</span>
+          </div>}
+          <div className="lv-meta">Classement officiel de la saison en cours (source football-data.org). ⭐ Lyon surligné.</div>
+        </section>
+      )}
       {teams.length > 0 && view === "journees" && (<>
         <div className="wc-hint">Tableau des <b>journées à venir</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
         {journees.length ? journees.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
@@ -3048,8 +3083,8 @@ function getH2HFromIntl(intlMatches, homeN, awayN) {
 
 function ScorersTab() {
   const [mode, setMode] = useState("comp");
-  // mode compétition (football-data.org)
-  const [league, setLeague] = useState("WC");
+  // mode compétition (football-data.org) — Ligue 1 par défaut (post-Mondial)
+  const [league, setLeague] = useState("FL1");
   const [players, setPlayers] = useState([]);
   const [team, setTeam] = useState("Toutes");
   // mode sélection (API-Football)
@@ -3142,7 +3177,7 @@ function ScorersTab() {
 const POS_FR = { Goalkeeper: "Gardien", Defence: "Défenseur", Midfield: "Milieu", Offence: "Attaquant", "Centre-Back": "Déf. central", "Right-Back": "Arrière droit", "Left-Back": "Arrière gauche", "Defensive Midfield": "Milieu déf.", "Central Midfield": "Milieu", "Attacking Midfield": "Milieu off.", "Centre-Forward": "Avant-centre", "Right Winger": "Ailier droit", "Left Winger": "Ailier gauche" };
 const posFr = (p) => POS_FR[p] || p || "—";
 function SquadsTab() {
-  const [league, setLeague] = useState("WC");
+  const [league, setLeague] = useState("FL1");
   const [teams, setTeams] = useState([]);
   const [sel, setSel] = useState(0);
   const [scorers, setScorers] = useState([]);
@@ -3160,9 +3195,14 @@ function SquadsTab() {
       if (!tr.ok) { const j = await tr.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + tr.status)); }
       const d = await tr.json();
       if (!d.teams || !d.teams.length) throw new Error("Aucune équipe (compétition pas encore active ?)");
-      // Nom français quand connu (sélections nationales), puis tri alphabétique.
-      const named = d.teams.map((t) => ({ ...t, frName: EN_TO_FR_NORM[normName(t.name)] || t.name }));
-      setTeams(named.sort((a, b) => a.frName.localeCompare(b.frName, "fr"))); setSel(0); setUpdated(new Date());
+      // Nom FR : clubs via clubFrName (CLUB_POOL → "Lyon", "Marseille"…),
+      // sélections nationales via EN_TO_FR_NORM. Puis tri alphabétique.
+      const isNat = league === "WC" || league === "EC";
+      const named = d.teams.map((t) => ({ ...t, frName: isNat ? (EN_TO_FR_NORM[normName(t.name)] || t.name) : clubFrName(league, t.name) }));
+      named.sort((a, b) => a.frName.localeCompare(b.frName, "fr"));
+      // Équipe favorite (Lyon) pré-sélectionnée quand elle est présente.
+      const lyonIdx = named.findIndex((t) => isLyon(t.name) || isLyon(t.frName));
+      setTeams(named); setSel(lyonIdx >= 0 ? lyonIdx : 0); setUpdated(new Date());
       if (sr.ok) {
         const sd = await sr.json();
         const raw = sd.players || [];
@@ -3181,11 +3221,14 @@ function SquadsTab() {
     if (!scorers.length) return [];
     const groups = {};
     scorers.forEach((p) => { if (!groups[p.team]) groups[p.team] = []; groups[p.team].push(p); });
+    const isNat = league === "WC" || league === "EC";
     return Object.entries(groups).map(([teamName, players]) => {
-      const frName = EN_TO_FR_NORM[normName(teamName)];
-      const poolEntry = frName ? POOL.find((t) => t.n === frName) : null;
+      const natFr = EN_TO_FR_NORM[normName(teamName)];
+      const poolEntry = natFr ? POOL.find((t) => t.n === natFr) : null;
+      const display = isNat ? (natFr || teamName) : clubFrName(league, teamName);
+      const flag = isNat ? (poolEntry ? poolEntry.f : "🏳️") : (isLyon(display) ? "⭐" : "");
       return {
-        teamName, display: frName || teamName, flag: poolEntry ? poolEntry.f : "🏳️",
+        teamName, display, flag,
         players: [...players].sort((a, b) => b.goals - a.goals || (b.assists || 0) - (a.assists || 0)).slice(0, 5),
         totalGoals: players.reduce((s, p) => s + p.goals, 0),
       };
@@ -3226,7 +3269,7 @@ function SquadsTab() {
       {teams.length > 0 && (
         <section className="pf-card">
           <div className="pf-result-head">Effectif complet</div>
-          <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{t.frName || t.name} ({t.squad.length})</option>)}</select>
+          <select className="sc-team" value={sel} onChange={(e) => setSel(Number(e.target.value))}>{teams.map((t, i) => <option key={i} value={i}>{(isLyon(t.name) || isLyon(t.frName)) ? "⭐ " : ""}{t.frName || t.name} ({t.squad.length})</option>)}</select>
           {team && team.squad.length > 0 && (<>
             <table className="wc-st sc-tbl">
               <thead><tr><th>Joueur</th><th>Poste</th><th>Nat.</th><th>Âge</th>{Object.keys(scorersMap).length > 0 && <><th>B</th><th>PD</th><th>J</th></>}</tr></thead>
@@ -3376,7 +3419,10 @@ const CSS = `
 .wc-glabel{font-family:'Saira Condensed';font-weight:700;font-size:16px;letter-spacing:.04em;text-transform:uppercase;flex:1;text-align:left;}
 .wc-gprog{font-family:'JetBrains Mono';font-size:11px;color:var(--dim);}
 .wc-group-body{padding:0 13px 14px;}
+.wc-tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 .wc-st{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:12px;}
+.wc-st .pf-form{justify-content:center;}
+@media(max-width:400px){.lv-hide-sm{display:none;}}
 .wc-st th{font-family:'Saira Condensed';font-weight:600;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);text-align:center;padding:4px 3px;border-bottom:1px solid var(--line);}
 .wc-st th:nth-child(2){text-align:left;}
 .wc-st td{text-align:center;padding:6px 3px;border-bottom:1px solid rgba(255,255,255,.04);font-family:'JetBrains Mono';}
