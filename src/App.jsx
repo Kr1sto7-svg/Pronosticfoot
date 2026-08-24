@@ -524,6 +524,48 @@ function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = 
   const w = Math.min(0.22, emp.n * 0.035); // poids croissant, plafonné (le H2H reste peu fiable)
   return { R: blendProbs(base, emp, w), h2hN: emp.n, w };
 }
+/* ---------- Historique persistant des journées de championnat ---------- */
+// Fusionne l'historique stocké avec les matchs terminés fraîchement récupérés
+// (par id de match) : une journée terminée reste en mémoire même si l'API ne la
+// renvoie plus. Borné à la saison en cours (démarre au 1er juillet) pour ne pas
+// mélanger deux saisons au moment de la reprise.
+function mergeHistory(prev, fresh) {
+  const byId = {};
+  (prev || []).forEach((m) => { if (m && m.id != null) byId[m.id] = m; });
+  (fresh || []).forEach((m) => { if (m && m.id != null) byId[m.id] = m; });
+  const now = new Date();
+  const seasonStart = new Date(now.getFullYear() - (now.getMonth() < 6 ? 1 : 0), 6, 1);
+  return Object.values(byId)
+    .filter((m) => new Date(m.date) >= seasonStart)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+// Injecte l'historique dans les forces des équipes : ratios attaque/défense des
+// derniers matchs pondérés par récence (décroissance exponentielle), mêlés aux
+// forces de la saison (poids plafonné à 30 %). Reconstruit aussi la chaîne de
+// forme W/D/L quand l'API ne la fournit pas (début de saison).
+function applyHistoryToTeams(teams, history, leagueAvg) {
+  if (!history || !history.length) return teams;
+  const clampR = (x) => Math.max(0.5, Math.min(1.8, x));
+  return teams.map((t) => {
+    // history est trié du plus récent au plus ancien
+    const games = history.filter((m) => (m.homeId === t.id || m.awayId === t.id) && m.homeGoals != null && m.awayGoals != null);
+    if (!games.length) return t;
+    let w = 1, sw = 0, gf = 0, ga = 0;
+    const letters = [];
+    for (const m of games.slice(0, 10)) {
+      const home = m.homeId === t.id;
+      const f = home ? m.homeGoals : m.awayGoals, a = home ? m.awayGoals : m.homeGoals;
+      gf += w * f; ga += w * a; sw += w;
+      if (letters.length < 5) letters.push(f > a ? "W" : f < a ? "L" : "D");
+      w *= 0.85;
+    }
+    const attR = clampR((gf / sw) / leagueAvg), defR = clampR((ga / sw) / leagueAvg);
+    const wh = Math.min(0.3, games.length * 0.05);
+    const out = { ...t, att: t.att * (1 - wh) + attR * wh, def: t.def * (1 - wh) + defR * wh };
+    if (!out.form) out.form = letters.slice().reverse().join(",");
+    return out;
+  });
+}
 function parseOdds(s) { const v = parseFloat(String(s).replace(",", ".")); return v > 1 ? v : null; }
 function fairProbs(o1, ox, o2) { const a = parseOdds(o1), b = parseOdds(ox), c = parseOdds(o2); if (!a || !b || !c) return null; const i1 = 1/a, ix = 1/b, i2 = 1/c, s = i1+ix+i2; return { p1: i1/s, px: ix/s, p2: i2/s, margin: s-1 }; }
 const pct = (x) => (x * 100).toFixed(1);
@@ -2705,12 +2747,30 @@ function JourneeCard({ j, defOpen, ...cardProps }) {
   return (
     <div className="pf-card wc-group">
       <button className="wc-group-head" onClick={() => setOpen(!open)}>
-        <span className="wc-glabel">Journée {j.md || "?"}{hasLyon && <span className="nat-fav" style={{ marginLeft: 7 }}>⭐ Lyon</span>}</span>
+        <span className="wc-glabel">Journée {j.md || "?"}{j.done && <span className="wc-mdone" style={{ marginLeft: 7 }}>Terminée</span>}{hasLyon && <span className="nat-fav" style={{ marginLeft: 7 }}>⭐ Lyon</span>}</span>
         <span className="wc-gprog">{j.matches.length} match{j.matches.length > 1 ? "s" : ""}</span>
         <ChevronDown size={16} className={open ? "pf-rot" : ""} />
       </button>
       {open && <div className="wc-group-body wc-matches">
         {j.matches.map((m, i) => <NationalMatchCard key={m.id || i} m={m} {...cardProps} />)}
+      </div>}
+    </div>
+  );
+}
+/* Historique des journées terminées : conservées en mémoire (store live:hist) et
+   regroupées dans une section repliable pour ne pas encombrer les journées à venir. */
+function FinishedJournees({ journees, cardProps }) {
+  const [open, setOpen] = useState(false);
+  if (!journees.length) return null;
+  return (
+    <div className="pf-card wc-group">
+      <button className="wc-group-head" onClick={() => setOpen(!open)}>
+        <span className="wc-glabel">✅ Journées terminées</span>
+        <span className="wc-gprog">{journees.length} journée{journees.length > 1 ? "s" : ""}</span>
+        <ChevronDown size={16} className={open ? "pf-rot" : ""} />
+      </button>
+      {open && <div className="wc-group-body">
+        {journees.map((j) => <JourneeCard key={j.md} j={j} defOpen={false} {...cardProps} />)}
       </div>}
     </div>
   );
@@ -2807,9 +2867,15 @@ function LiveTab() {
       // AVEC les forces : une seule salve d'appels par rafraîchissement manuel.
       let upcoming = [], finished = [];
       try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
+      // Historique persistant : les journées terminées sont fusionnées avec celles
+      // déjà en mémoire (jamais perdues, même si l'API ne les renvoie plus) et
+      // réinjectées dans les forces des équipes pour le calcul des probabilités.
+      const histAll = mergeHistory(await store.get("live:hist:" + league), finished);
+      if (histAll.length) { finished = histAll; await store.set("live:hist:" + league, histAll); }
       let oddsEv = [], oddsN = "";
       try { const or = await fetch("/api/stats?source=odds&league=" + league); const od = await or.json(); oddsEv = od.events || []; if (!oddsEv.length) oddsN = od.note || ""; } catch { oddsN = "Cotes indisponibles."; }
       const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS;
+      tm = applyHistoryToTeams(tm, histAll, leagueAvgV);
       setTeams(tm); setXgOn(xgActive); setLeagueAvg(leagueAvgV); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
       setUp(upcoming); setFin(finished); setOdds(oddsEv); setOddsNote(oddsN); if (noteText) setNote(noteText);
       await store.set("live:data:" + league, { teams: tm, leagueAvg: leagueAvgV, xgOn: xgActive, upcoming, finished, odds: oddsEv, oddsNote: oddsN, note: noteText, updated: new Date().toISOString() });
@@ -2857,18 +2923,21 @@ function LiveTab() {
   const byId = (id) => teams.find((t) => t.id === id);
   const byName = (n) => teams.find((t) => normName(t.name) === normName(n));
   const teamById = (id) => byId(id);
-  // Prochaines journées : matchs à venir regroupés par journée (chronologique). On
-  // COMPLÈTE chaque journée en cours avec ses matchs DÉJÀ JOUÉS (rangés dans
-  // `finished` par l'API) — sinon une journée partiellement disputée (ex. J1/J2 en
-  // début de saison) apparaît incomplète. On n'ajoute pas les journées entièrement
-  // passées (uniquement celles qui ont encore au moins un match à venir).
+  // Journées regroupées par matchday (chronologique) : matchs à venir + matchs
+  // déjà joués. Les journées ENTIÈREMENT terminées restent listées (marquées
+  // `done`) — l'historique est conservé en mémoire (store live:hist) et affiché
+  // dans une section repliable, au lieu de disparaître comme avant.
   const journees = useMemo(() => {
     const byMd = {};
     up.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
-    fin.forEach((m) => { const md = m.matchday || 0; if (byMd[md]) byMd[md].push(m); });
+    fin.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
     return Object.keys(byMd).map(Number).sort((x, y) => x - y)
-      .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
+      .map((md) => {
+        const matches = byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date));
+        return { md, matches, done: matches.every((m) => m.homeGoals != null && m.awayGoals != null) };
+      });
   }, [up, fin]);
+  const journeesDone = journees.filter((j) => j.done), journeesTodo = journees.filter((j) => !j.done);
   // Classement live : tri officiel (rang API, sinon pts / diff / BP).
   const ranked = useMemo(() => teams.slice().sort((a, b) =>
     (a.position || 99) - (b.position || 99)
@@ -2948,8 +3017,9 @@ function LiveTab() {
         </section>
       )}
       {teams.length > 0 && view === "journees" && (<>
-        <div className="wc-hint">Tableau des <b>journées à venir</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
-        {journees.length ? journees.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
+        <div className="wc-hint">Tableau des <b>journées</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b> + <b>historique des journées passées</b>). Les journées terminées restent en mémoire (section ✅) et alimentent les probabilités. Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
+        <FinishedJournees journees={journeesDone} cardProps={cardProps} />
+        {journeesTodo.length ? journeesTodo.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
           : <section className="pf-card"><div className="lv-meta">Aucun match à venir renvoyé par l'API (intersaison ?).</div></section>}
       </>)}
       {teams.length > 0 && view === "analyse" && (<>
