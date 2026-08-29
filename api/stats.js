@@ -85,8 +85,8 @@ export default async function handler(req, res) {
    * reason "Suspended" / "Red Card" / blessure. Les postes (G/D/M/A) sont joints
    * depuis les effectifs football-data.org pour pondérer l'impact att/def. */
   if (source === "absences") {
-    const key = process.env.APIFOOTBALL_KEY;
-    if (!key) return res.status(200).json({ source, supported: false, teams: [], note: "APIFOOTBALL_KEY non configurée — blessures/suspensions indisponibles." });
+    const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
+    if (!key) return res.status(200).json({ source, supported: false, teams: [], note: "APIFOOTBALL_KEY (ou API_KEY) non configurée — blessures/suspensions indisponibles." });
     const LG = { WC: 1 }; // ids de compétitions API-Football
     const lgId = LG[league || "WC"] || 1;
     const season = req.query.season || "2026";
@@ -164,8 +164,8 @@ export default async function handler(req, res) {
     const qh = req.query.home, qa = req.query.away;
     if (!qh || !qa) return res.status(400).json({ error: "paramètres 'home' et 'away' requis" });
     res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
-    const key = process.env.APIFOOTBALL_KEY;
-    if (!key) return res.status(200).json({ source, supported: false, note: "APIFOOTBALL_KEY non configurée — compositions indisponibles." });
+    const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
+    if (!key) return res.status(200).json({ source, supported: false, note: "APIFOOTBALL_KEY (ou API_KEY) non configurée — compositions indisponibles." });
     const AH = { "x-apisports-key": key };
     const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
     const posCode = (p) => { const s = (p || "").toUpperCase(); return s === "G" ? "G" : s === "D" ? "D" : s === "M" ? "M" : s === "F" ? "A" : ""; };
@@ -289,7 +289,7 @@ export default async function handler(req, res) {
         return (tj.teams || []).find((t) => norm(t.name) === nq || norm(t.shortName || "") === nq)
           || (tj.teams || []).find((t) => norm(t.name).includes(nq) || nq.includes(norm(t.name)));
       };
-      const key = process.env.APIFOOTBALL_KEY;
+      const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
       // Stats en sélection (buts/matchs) via API-Football, saison la plus récente dispo.
       const natStats = async (q) => {
         if (!key) return {};
@@ -379,8 +379,8 @@ export default async function handler(req, res) {
 
     /* ---- SÉLECTION NATIONALE via API-Football (squad + stats joueurs) ---- */
     if (source === "natteam") {
-      const key = process.env.APIFOOTBALL_KEY;
-      if (!key) return res.status(500).json({ error: "APIFOOTBALL_KEY non configurée (clé api-football.com requise pour les sélections)" });
+      const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
+      if (!key) return res.status(500).json({ error: "APIFOOTBALL_KEY (ou API_KEY) non configurée (clé api-football.com requise pour les sélections)" });
       const q = req.query.q, season = req.query.season || "2024";
       if (!q) return res.status(400).json({ error: "paramètre 'q' (nom de la sélection) requis" });
       const AH = { "x-apisports-key": key };
