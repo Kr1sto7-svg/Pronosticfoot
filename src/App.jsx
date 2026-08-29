@@ -15,8 +15,8 @@ const BASE_GOALS = 1.35, HOME_MULT = 1.18, AWAY_MULT = 0.92, RHO = -0.13, MAXG =
 const FORM_DECAY = 0.75;
 const ELO_BETA = 0.25; // poids de l'écart Elo sur les xG : ±400 Elo ≈ ×1.28 / ÷1.28
 const WC_AVG = 1.18;
-const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
-const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
+const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, EL: 1.34, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
+const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, EL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
 const LETTERS = "ABCDEFGHIJKL".split("");
 /* Calendrier OFFICIEL des matchs de groupes (FIFA), dans l'ordre chronologique réel.
  * x / y = position des équipes dans GROUPS_2026 (orientation domicile/extérieur officielle) ;
@@ -335,6 +335,248 @@ const EURO_POOL = [
   { n: "Slavia Prague",      f: "🇨🇿", elo: 1720, att: 0.95, def: 1.00 },
   { n: "Young Boys",         f: "🇨🇭", elo: 1700, att: 0.95, def: 1.05 },
 ];
+
+/* ---------- Ligue Europa 2025-26 — phase de ligue (données figées) ----------
+ * L'Europa League n'est couverte NI par football-data.org (gratuit), NI par le
+ * plan gratuit d'API-Football (limité aux saisons 2021-2023). On fige donc la
+ * saison 2025-26 (résultats officiels UEFA / Wikipédia) : 36 clubs + classement
+ * final + les 144 matchs des 8 journées. Le moteur (forces + compo + Poisson/
+ * Dixon-Coles) tourne EXACTEMENT comme la C1 ; les forces att/déf de chaque club
+ * sont dérivées de son bilan réel de la phase de ligue (buts pour/contre par match
+ * relatifs à la moyenne de la compétition), comme le fait l'API pour les autres. */
+const EL_2025_STANDINGS = [
+  { pos: 1,  n: "Lyon",               w: 7, d: 0, l: 1, gf: 18, ga: 5,  pts: 21 },
+  { pos: 2,  n: "Aston Villa",        w: 7, d: 0, l: 1, gf: 14, ga: 6,  pts: 21 },
+  { pos: 3,  n: "Midtjylland",        w: 6, d: 1, l: 1, gf: 18, ga: 8,  pts: 19 },
+  { pos: 4,  n: "Real Betis",         w: 5, d: 2, l: 1, gf: 13, ga: 7,  pts: 17 },
+  { pos: 5,  n: "Porto",              w: 5, d: 2, l: 1, gf: 13, ga: 7,  pts: 17 },
+  { pos: 6,  n: "Braga",              w: 5, d: 2, l: 1, gf: 11, ga: 5,  pts: 17 },
+  { pos: 7,  n: "SC Freiburg",        w: 5, d: 2, l: 1, gf: 10, ga: 4,  pts: 17 },
+  { pos: 8,  n: "Roma",               w: 5, d: 1, l: 2, gf: 13, ga: 6,  pts: 16 },
+  { pos: 9,  n: "Genk",               w: 5, d: 1, l: 2, gf: 11, ga: 7,  pts: 16 },
+  { pos: 10, n: "Bologna",            w: 4, d: 3, l: 1, gf: 14, ga: 7,  pts: 15 },
+  { pos: 11, n: "VfB Stuttgart",      w: 5, d: 0, l: 3, gf: 15, ga: 9,  pts: 15 },
+  { pos: 12, n: "Ferencváros",        w: 4, d: 3, l: 1, gf: 12, ga: 11, pts: 15 },
+  { pos: 13, n: "Nottingham Forest",  w: 4, d: 2, l: 2, gf: 15, ga: 7,  pts: 14 },
+  { pos: 14, n: "Viktoria Plzeň",     w: 3, d: 5, l: 0, gf: 8,  ga: 3,  pts: 14 },
+  { pos: 15, n: "Red Star Belgrade",  w: 4, d: 2, l: 2, gf: 7,  ga: 6,  pts: 14 },
+  { pos: 16, n: "Celta Vigo",         w: 4, d: 1, l: 3, gf: 15, ga: 11, pts: 13 },
+  { pos: 17, n: "PAOK",               w: 3, d: 3, l: 2, gf: 17, ga: 14, pts: 12 },
+  { pos: 18, n: "Lille",              w: 4, d: 0, l: 4, gf: 12, ga: 9,  pts: 12 },
+  { pos: 19, n: "Fenerbahçe",         w: 3, d: 3, l: 2, gf: 10, ga: 7,  pts: 12 },
+  { pos: 20, n: "Panathinaikos",      w: 3, d: 3, l: 2, gf: 11, ga: 9,  pts: 12 },
+  { pos: 21, n: "Celtic",             w: 3, d: 2, l: 3, gf: 13, ga: 15, pts: 11 },
+  { pos: 22, n: "Ludogorets Razgrad", w: 3, d: 1, l: 4, gf: 12, ga: 15, pts: 10 },
+  { pos: 23, n: "Dinamo Zagreb",      w: 3, d: 1, l: 4, gf: 12, ga: 16, pts: 10 },
+  { pos: 24, n: "Brann",              w: 2, d: 3, l: 3, gf: 9,  ga: 11, pts: 9  },
+  { pos: 25, n: "Young Boys",         w: 3, d: 0, l: 5, gf: 10, ga: 16, pts: 9  },
+  { pos: 26, n: "Sturm Graz",         w: 2, d: 1, l: 5, gf: 5,  ga: 11, pts: 7  },
+  { pos: 27, n: "FCSB",               w: 2, d: 1, l: 5, gf: 9,  ga: 16, pts: 7  },
+  { pos: 28, n: "Go Ahead Eagles",    w: 2, d: 1, l: 5, gf: 6,  ga: 14, pts: 7  },
+  { pos: 29, n: "Feyenoord",          w: 2, d: 0, l: 6, gf: 11, ga: 15, pts: 6  },
+  { pos: 30, n: "Basel",              w: 2, d: 0, l: 6, gf: 9,  ga: 13, pts: 6  },
+  { pos: 31, n: "Red Bull Salzburg",  w: 2, d: 0, l: 6, gf: 10, ga: 15, pts: 6  },
+  { pos: 32, n: "Rangers",            w: 1, d: 1, l: 6, gf: 5,  ga: 14, pts: 4  },
+  { pos: 33, n: "Nice",               w: 1, d: 0, l: 7, gf: 7,  ga: 15, pts: 3  },
+  { pos: 34, n: "Utrecht",            w: 0, d: 1, l: 7, gf: 5,  ga: 15, pts: 1  },
+  { pos: 35, n: "Malmö FF",           w: 0, d: 1, l: 7, gf: 4,  ga: 15, pts: 1  },
+  { pos: 36, n: "Maccabi Tel Aviv",   w: 0, d: 1, l: 7, gf: 2,  ga: 22, pts: 1  },
+];
+/* 144 matchs officiels (md = journée, h/a = domicile/extérieur, hg/ag = score).
+ * Noms canoniques identiques à EL_2025_STANDINGS (variantes UEFA harmonisées). */
+const EL_2025_RESULTS = [
+  // Journée 1
+  { md: 1, h: "Midtjylland", a: "Sturm Graz", hg: 2, ag: 0 },
+  { md: 1, h: "PAOK", a: "Maccabi Tel Aviv", hg: 0, ag: 0 },
+  { md: 1, h: "Red Star Belgrade", a: "Celtic", hg: 1, ag: 1 },
+  { md: 1, h: "Dinamo Zagreb", a: "Fenerbahçe", hg: 3, ag: 1 },
+  { md: 1, h: "Malmö FF", a: "Ludogorets Razgrad", hg: 1, ag: 2 },
+  { md: 1, h: "Nice", a: "Roma", hg: 1, ag: 2 },
+  { md: 1, h: "Real Betis", a: "Nottingham Forest", hg: 2, ag: 2 },
+  { md: 1, h: "Braga", a: "Feyenoord", hg: 1, ag: 0 },
+  { md: 1, h: "SC Freiburg", a: "Basel", hg: 2, ag: 1 },
+  { md: 1, h: "Go Ahead Eagles", a: "FCSB", hg: 0, ag: 1 },
+  { md: 1, h: "Lille", a: "Brann", hg: 2, ag: 1 },
+  { md: 1, h: "Aston Villa", a: "Bologna", hg: 1, ag: 0 },
+  { md: 1, h: "Young Boys", a: "Panathinaikos", hg: 1, ag: 4 },
+  { md: 1, h: "Red Bull Salzburg", a: "Porto", hg: 0, ag: 1 },
+  { md: 1, h: "Utrecht", a: "Lyon", hg: 0, ag: 1 },
+  { md: 1, h: "Ferencváros", a: "Viktoria Plzeň", hg: 1, ag: 1 },
+  { md: 1, h: "Rangers", a: "Genk", hg: 0, ag: 1 },
+  { md: 1, h: "VfB Stuttgart", a: "Celta Vigo", hg: 2, ag: 1 },
+  // Journée 2
+  { md: 2, h: "Roma", a: "Lille", hg: 0, ag: 1 },
+  { md: 2, h: "Bologna", a: "SC Freiburg", hg: 1, ag: 1 },
+  { md: 2, h: "Celtic", a: "Braga", hg: 0, ag: 2 },
+  { md: 2, h: "Viktoria Plzeň", a: "Malmö FF", hg: 3, ag: 0 },
+  { md: 2, h: "Fenerbahçe", a: "Nice", hg: 2, ag: 1 },
+  { md: 2, h: "FCSB", a: "Young Boys", hg: 0, ag: 2 },
+  { md: 2, h: "Panathinaikos", a: "Go Ahead Eagles", hg: 1, ag: 2 },
+  { md: 2, h: "Ludogorets Razgrad", a: "Real Betis", hg: 0, ag: 2 },
+  { md: 2, h: "Brann", a: "Utrecht", hg: 1, ag: 0 },
+  { md: 2, h: "Basel", a: "VfB Stuttgart", hg: 2, ag: 0 },
+  { md: 2, h: "Porto", a: "Red Star Belgrade", hg: 2, ag: 1 },
+  { md: 2, h: "Feyenoord", a: "Aston Villa", hg: 0, ag: 2 },
+  { md: 2, h: "Genk", a: "Ferencváros", hg: 0, ag: 1 },
+  { md: 2, h: "Maccabi Tel Aviv", a: "Dinamo Zagreb", hg: 1, ag: 3 },
+  { md: 2, h: "Nottingham Forest", a: "Midtjylland", hg: 2, ag: 3 },
+  { md: 2, h: "Lyon", a: "Red Bull Salzburg", hg: 2, ag: 0 },
+  { md: 2, h: "Celta Vigo", a: "PAOK", hg: 3, ag: 1 },
+  { md: 2, h: "Sturm Graz", a: "Rangers", hg: 2, ag: 1 },
+  // Journée 3
+  { md: 3, h: "Red Bull Salzburg", a: "Ferencváros", hg: 2, ag: 3 },
+  { md: 3, h: "Fenerbahçe", a: "VfB Stuttgart", hg: 1, ag: 0 },
+  { md: 3, h: "FCSB", a: "Bologna", hg: 1, ag: 2 },
+  { md: 3, h: "Go Ahead Eagles", a: "Aston Villa", hg: 2, ag: 1 },
+  { md: 3, h: "Genk", a: "Real Betis", hg: 0, ag: 0 },
+  { md: 3, h: "Lyon", a: "Basel", hg: 2, ag: 0 },
+  { md: 3, h: "Braga", a: "Red Star Belgrade", hg: 2, ag: 0 },
+  { md: 3, h: "Brann", a: "Rangers", hg: 3, ag: 0 },
+  { md: 3, h: "Feyenoord", a: "Panathinaikos", hg: 3, ag: 1 },
+  { md: 3, h: "Roma", a: "Viktoria Plzeň", hg: 1, ag: 2 },
+  { md: 3, h: "Young Boys", a: "Ludogorets Razgrad", hg: 3, ag: 2 },
+  { md: 3, h: "Celtic", a: "Sturm Graz", hg: 2, ag: 1 },
+  { md: 3, h: "Lille", a: "PAOK", hg: 3, ag: 4 },
+  { md: 3, h: "Maccabi Tel Aviv", a: "Midtjylland", hg: 0, ag: 3 },
+  { md: 3, h: "Malmö FF", a: "Dinamo Zagreb", hg: 1, ag: 1 },
+  { md: 3, h: "Nottingham Forest", a: "Porto", hg: 2, ag: 0 },
+  { md: 3, h: "Celta Vigo", a: "Nice", hg: 2, ag: 1 },
+  { md: 3, h: "SC Freiburg", a: "Utrecht", hg: 2, ag: 0 },
+  // Journée 4
+  { md: 4, h: "Red Bull Salzburg", a: "Go Ahead Eagles", hg: 2, ag: 0 },
+  { md: 4, h: "Basel", a: "FCSB", hg: 3, ag: 1 },
+  { md: 4, h: "Midtjylland", a: "Celtic", hg: 3, ag: 1 },
+  { md: 4, h: "Utrecht", a: "Porto", hg: 1, ag: 1 },
+  { md: 4, h: "Red Star Belgrade", a: "Lille", hg: 1, ag: 0 },
+  { md: 4, h: "Dinamo Zagreb", a: "Celta Vigo", hg: 0, ag: 3 },
+  { md: 4, h: "Malmö FF", a: "Panathinaikos", hg: 0, ag: 1 },
+  { md: 4, h: "Nice", a: "SC Freiburg", hg: 1, ag: 3 },
+  { md: 4, h: "Sturm Graz", a: "Nottingham Forest", hg: 0, ag: 0 },
+  { md: 4, h: "Aston Villa", a: "Maccabi Tel Aviv", hg: 2, ag: 0 },
+  { md: 4, h: "Bologna", a: "Brann", hg: 0, ag: 0 },
+  { md: 4, h: "Viktoria Plzeň", a: "Fenerbahçe", hg: 0, ag: 0 },
+  { md: 4, h: "Ferencváros", a: "Ludogorets Razgrad", hg: 3, ag: 1 },
+  { md: 4, h: "PAOK", a: "Young Boys", hg: 4, ag: 0 },
+  { md: 4, h: "Rangers", a: "Roma", hg: 0, ag: 2 },
+  { md: 4, h: "Real Betis", a: "Lyon", hg: 2, ag: 0 },
+  { md: 4, h: "Braga", a: "Genk", hg: 3, ag: 4 },
+  { md: 4, h: "VfB Stuttgart", a: "Feyenoord", hg: 2, ag: 0 },
+  // Journée 5
+  { md: 5, h: "Roma", a: "Midtjylland", hg: 2, ag: 1 },
+  { md: 5, h: "Aston Villa", a: "Young Boys", hg: 2, ag: 1 },
+  { md: 5, h: "Porto", a: "Nice", hg: 3, ag: 0 },
+  { md: 5, h: "Viktoria Plzeň", a: "SC Freiburg", hg: 0, ag: 0 },
+  { md: 5, h: "Fenerbahçe", a: "Ferencváros", hg: 1, ag: 1 },
+  { md: 5, h: "Feyenoord", a: "Celtic", hg: 1, ag: 3 },
+  { md: 5, h: "Lille", a: "Dinamo Zagreb", hg: 4, ag: 0 },
+  { md: 5, h: "PAOK", a: "Brann", hg: 1, ag: 1 },
+  { md: 5, h: "Ludogorets Razgrad", a: "Celta Vigo", hg: 3, ag: 2 },
+  { md: 5, h: "Bologna", a: "Red Bull Salzburg", hg: 4, ag: 1 },
+  { md: 5, h: "Red Star Belgrade", a: "FCSB", hg: 1, ag: 0 },
+  { md: 5, h: "Go Ahead Eagles", a: "VfB Stuttgart", hg: 0, ag: 4 },
+  { md: 5, h: "Genk", a: "Basel", hg: 2, ag: 1 },
+  { md: 5, h: "Maccabi Tel Aviv", a: "Lyon", hg: 0, ag: 6 },
+  { md: 5, h: "Nottingham Forest", a: "Malmö FF", hg: 3, ag: 0 },
+  { md: 5, h: "Panathinaikos", a: "Sturm Graz", hg: 2, ag: 1 },
+  { md: 5, h: "Rangers", a: "Braga", hg: 1, ag: 1 },
+  { md: 5, h: "Real Betis", a: "Utrecht", hg: 2, ag: 1 },
+  // Journée 6
+  { md: 6, h: "Young Boys", a: "Lille", hg: 1, ag: 0 },
+  { md: 6, h: "Midtjylland", a: "Genk", hg: 1, ag: 0 },
+  { md: 6, h: "Utrecht", a: "Nottingham Forest", hg: 1, ag: 2 },
+  { md: 6, h: "Ferencváros", a: "Rangers", hg: 2, ag: 1 },
+  { md: 6, h: "Dinamo Zagreb", a: "Real Betis", hg: 1, ag: 3 },
+  { md: 6, h: "Nice", a: "Braga", hg: 0, ag: 1 },
+  { md: 6, h: "Ludogorets Razgrad", a: "PAOK", hg: 3, ag: 3 },
+  { md: 6, h: "Sturm Graz", a: "Red Star Belgrade", hg: 0, ag: 1 },
+  { md: 6, h: "VfB Stuttgart", a: "Maccabi Tel Aviv", hg: 4, ag: 1 },
+  { md: 6, h: "Celtic", a: "Roma", hg: 0, ag: 3 },
+  { md: 6, h: "Porto", a: "Malmö FF", hg: 2, ag: 1 },
+  { md: 6, h: "Basel", a: "Aston Villa", hg: 1, ag: 2 },
+  { md: 6, h: "FCSB", a: "Feyenoord", hg: 4, ag: 3 },
+  { md: 6, h: "Lyon", a: "Go Ahead Eagles", hg: 2, ag: 1 },
+  { md: 6, h: "Panathinaikos", a: "Viktoria Plzeň", hg: 0, ag: 0 },
+  { md: 6, h: "Celta Vigo", a: "Bologna", hg: 1, ag: 2 },
+  { md: 6, h: "SC Freiburg", a: "Red Bull Salzburg", hg: 1, ag: 0 },
+  { md: 6, h: "Brann", a: "Fenerbahçe", hg: 0, ag: 4 },
+  // Journée 7
+  { md: 7, h: "Bologna", a: "Celtic", hg: 2, ag: 2 },
+  { md: 7, h: "Young Boys", a: "Lyon", hg: 0, ag: 1 },
+  { md: 7, h: "Viktoria Plzeň", a: "Porto", hg: 1, ag: 1 },
+  { md: 7, h: "Fenerbahçe", a: "Aston Villa", hg: 0, ag: 1 },
+  { md: 7, h: "Feyenoord", a: "Sturm Graz", hg: 3, ag: 0 },
+  { md: 7, h: "Malmö FF", a: "Red Star Belgrade", hg: 0, ag: 1 },
+  { md: 7, h: "PAOK", a: "Real Betis", hg: 2, ag: 0 },
+  { md: 7, h: "SC Freiburg", a: "Maccabi Tel Aviv", hg: 1, ag: 0 },
+  { md: 7, h: "Brann", a: "Midtjylland", hg: 3, ag: 3 },
+  { md: 7, h: "Roma", a: "VfB Stuttgart", hg: 2, ag: 0 },
+  { md: 7, h: "Red Bull Salzburg", a: "Basel", hg: 3, ag: 1 },
+  { md: 7, h: "Ferencváros", a: "Panathinaikos", hg: 1, ag: 1 },
+  { md: 7, h: "Dinamo Zagreb", a: "FCSB", hg: 4, ag: 1 },
+  { md: 7, h: "Nice", a: "Go Ahead Eagles", hg: 3, ag: 1 },
+  { md: 7, h: "Rangers", a: "Ludogorets Razgrad", hg: 1, ag: 0 },
+  { md: 7, h: "Celta Vigo", a: "Lille", hg: 2, ag: 1 },
+  { md: 7, h: "Braga", a: "Nottingham Forest", hg: 1, ag: 0 },
+  { md: 7, h: "Utrecht", a: "Genk", hg: 0, ag: 2 },
+  // Journée 8
+  { md: 8, h: "Aston Villa", a: "Red Bull Salzburg", hg: 3, ag: 2 },
+  { md: 8, h: "Celtic", a: "Utrecht", hg: 4, ag: 2 },
+  { md: 8, h: "Porto", a: "Rangers", hg: 3, ag: 1 },
+  { md: 8, h: "Basel", a: "Viktoria Plzeň", hg: 0, ag: 1 },
+  { md: 8, h: "Midtjylland", a: "Dinamo Zagreb", hg: 2, ag: 0 },
+  { md: 8, h: "Red Star Belgrade", a: "Celta Vigo", hg: 1, ag: 1 },
+  { md: 8, h: "FCSB", a: "Fenerbahçe", hg: 1, ag: 1 },
+  { md: 8, h: "Go Ahead Eagles", a: "Braga", hg: 0, ag: 0 },
+  { md: 8, h: "Genk", a: "Malmö FF", hg: 2, ag: 1 },
+  { md: 8, h: "Lille", a: "SC Freiburg", hg: 1, ag: 0 },
+  { md: 8, h: "Maccabi Tel Aviv", a: "Bologna", hg: 0, ag: 3 },
+  { md: 8, h: "Nottingham Forest", a: "Ferencváros", hg: 4, ag: 0 },
+  { md: 8, h: "Lyon", a: "PAOK", hg: 4, ag: 2 },
+  { md: 8, h: "Panathinaikos", a: "Roma", hg: 1, ag: 1 },
+  { md: 8, h: "Ludogorets Razgrad", a: "Nice", hg: 1, ag: 0 },
+  { md: 8, h: "Real Betis", a: "Feyenoord", hg: 2, ag: 1 },
+  { md: 8, h: "Sturm Graz", a: "Brann", hg: 1, ag: 0 },
+  { md: 8, h: "VfB Stuttgart", a: "Young Boys", hg: 3, ag: 2 },
+];
+/* Dates (heure UTC indicative) des 8 journées de la phase de ligue 2025-26. */
+const EL_2025_MD_DATES = {
+  1: "2025-09-24T17:00:00Z", 2: "2025-10-02T17:00:00Z", 3: "2025-10-23T17:00:00Z", 4: "2025-11-06T17:00:00Z",
+  5: "2025-11-27T17:00:00Z", 6: "2025-12-11T17:00:00Z", 7: "2026-01-22T17:00:00Z", 8: "2026-01-29T17:00:00Z",
+};
+/* Construit l'état de l'onglet Europe (mêmes formes que le live C1) à partir des
+ * données figées : `teams` (forces dérivées du bilan réel), `fin` (144 matchs
+ * terminés) et `leagueAvg` calculé sur la compétition. Rejoué à chaque affichage. */
+function buildEuropaLeague2025() {
+  const elId = (name) => "el-" + normName(name).replace(/\s+/g, "-");
+  const N = EL_2025_STANDINGS.length;
+  const totalGoals = EL_2025_STANDINGS.reduce((s, t) => s + t.gf, 0);
+  const leagueAvg = totalGoals / (N * 8);
+  const clamp = (x) => Math.max(0.6, Math.min(1.7, x));
+  // Forme (W/D/L) par équipe, dans l'ordre des journées, pour l'ajustement « forme ».
+  const formById = {};
+  EL_2025_RESULTS.forEach((m) => {
+    const hid = elId(m.h), aid = elId(m.a);
+    const hr = m.hg > m.ag ? "W" : m.hg < m.ag ? "L" : "D";
+    const ar = m.ag > m.hg ? "W" : m.ag < m.hg ? "L" : "D";
+    (formById[hid] = formById[hid] || []).push(hr);
+    (formById[aid] = formById[aid] || []).push(ar);
+  });
+  const teams = EL_2025_STANDINGS.map((t) => {
+    const att = clamp((t.gf / 8) / leagueAvg), def = clamp((t.ga / 8) / leagueAvg);
+    return {
+      id: elId(t.n), name: t.n, crest: null, matches: 8,
+      position: t.pos, points: t.pts, won: t.w, draw: t.d, lost: t.l,
+      goalsFor: t.gf, goalsAgainst: t.ga, goalDifference: t.gf - t.ga,
+      att, def, elo: eloFromRatings(att, def), form: (formById[elId(t.n)] || []).join(","),
+    };
+  });
+  const fin = EL_2025_RESULTS.map((m, i) => ({
+    id: "el-m" + m.md + "-" + i, date: EL_2025_MD_DATES[m.md], matchday: m.md, status: "FINISHED", stage: "LEAGUE_STAGE",
+    home: m.h, away: m.a, homeId: elId(m.h), awayId: elId(m.a),
+    homeGoals: m.hg, awayGoals: m.ag, winner: m.hg > m.ag ? "HOME_TEAM" : m.hg < m.ag ? "AWAY_TEAM" : "DRAW",
+  }));
+  return { teams, fin, leagueAvg };
+}
 
 /* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
 const FIFA_RANK = {
@@ -1854,10 +2096,11 @@ function GroupCard({ gi, group, results, eff, bestThirds, onTeam, onValidate, on
         <ChevronDown size={16} className={open ? "pf-rot" : ""} />
       </button>
       {open && (<div className="wc-group-body">
-        <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th></tr></thead>
+        <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th><th className="lv-hide-sm">Forme</th></tr></thead>
           <tbody>{table.map((r, i) => {
             const q = i < 2 ? "q" : (i === 2 && bestThirds.has(r.ti)) ? "q3" : "";
-            return <tr key={r.ti} className={"wc-row-" + (q || "x")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{POOL[r.ti].f}</span>{short(POOL[r.ti].n)}{q === "q" && <span className="wc-qb">Q</span>}{q === "q3" && <span className="wc-qb wc-qb3">3e</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td></tr>;
+            const seq = (situation[group.indexOf(r.ti)] || {}).seq || [];
+            return <tr key={r.ti} className={"wc-row-" + (q || "x")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{POOL[r.ti].f}</span>{short(POOL[r.ti].n)}{q === "q" && <span className="wc-qb">Q</span>}{q === "q3" && <span className="wc-qb wc-qb3">3e</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td><td className="lv-hide-sm">{seq.length ? <FormPills form={seq.slice(-5)} /> : "—"}</td></tr>;
           })}</tbody>
         </table>
         <div className="wc-edit">{[0,1,2,3].map((s) => (
@@ -2393,13 +2636,15 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
  * pourra être enrichi plus tard (saisie de scores, tableau). */
 const nlId = (gi, r, x, y) => "NL" + gi + "-" + r + "-" + x + "-" + y;
 function nlStandings(group, results, gi, poolByName) {
-  const rows = group.map((name) => ({ name, pts: 0, gf: 0, ga: 0, gp: 0 }));
+  const rows = group.map((name) => ({ name, pts: 0, gf: 0, ga: 0, gp: 0, seq: [] }));
   NL_ROUNDS.forEach((round, r) => round.forEach(({ x, y }) => {
     const res = results[nlId(gi, r, x, y)];
     if (res && res.hg != null && res.ag != null) {
       const X = rows[x], Y = rows[y];
       X.gf += res.hg; X.ga += res.ag; X.gp++; Y.gf += res.ag; Y.ga += res.hg; Y.gp++;
-      if (res.hg > res.ag) X.pts += 3; else if (res.hg < res.ag) Y.pts += 3; else { X.pts++; Y.pts++; }
+      if (res.hg > res.ag) { X.pts += 3; X.seq.push("W"); Y.seq.push("L"); }
+      else if (res.hg < res.ag) { Y.pts += 3; Y.seq.push("W"); X.seq.push("L"); }
+      else { X.pts++; Y.pts++; X.seq.push("D"); Y.seq.push("D"); }
     }
   }));
   rows.forEach((row) => (row.gd = row.gf - row.ga));
@@ -2448,10 +2693,10 @@ function NLGroupCard({ gi, label, group, results, pool, poolByName, comp, lastCo
         <ChevronDown size={16} className={open ? "pf-rot" : ""} />
       </button>
       {open && (<div className="wc-group-body">
-        <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th></tr></thead>
+        <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th><th className="lv-hide-sm">Forme</th></tr></thead>
           <tbody>{table.map((r, i) => {
             const t = poolByName[r.name];
-            return <tr key={r.name} className={"wc-row-" + (i === 0 ? "q" : "x")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{t ? t.f : "🏳️"}</span>{short(r.name)}{i === 0 && <span className="wc-qb">Q</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td></tr>;
+            return <tr key={r.name} className={"wc-row-" + (i === 0 ? "q" : "x")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{t ? t.f : "🏳️"}</span>{short(r.name)}{i === 0 && <span className="wc-qb">Q</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td><td className="lv-hide-sm">{r.seq && r.seq.length ? <FormPills form={r.seq.slice(-5)} /> : "—"}</td></tr>;
           })}</tbody>
         </table>
         <div className="wc-edit">{[0, 1, 2, 3].map((s) => (
@@ -2675,7 +2920,7 @@ function useClubLineups(league, active) {
  * compo/formation) + panneau de composition (comme le Mondial). La compo suit la
  * même priorité : saisie manuelle > compo officielle (live) > dernière compo
  * connue > formation par défaut déduite du style de l'équipe. */
-function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, lastComp, lineups, onCompChange, onCompReset, onRefresh }) {
+function NationalMatchCard({ m, league, teamById, leagueAvg, rho, predictPlayed = false, roster, comp, lastComp, lineups, onCompChange, onCompReset, onRefresh }) {
   const flag = (CLUB_LEAGUES.find((l) => l.code === league) || {}).f || "🏆";
   const hh = teamById(m.homeId), aw = teamById(m.awayId);
   const frH = clubFrName(league, m.home), frA = clubFrName(league, m.away);
@@ -2715,11 +2960,19 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, roster, comp, 
         <i style={{ color: "var(--dim)", fontStyle: "normal" }}>–</i>
         <span className={"wc-mt wc-r" + (isLyon(frA) ? " nat-lyon-t" : "")} style={winA ? { fontWeight: 800 } : undefined}>{frA}</span>
       </div>
-      {played ? (
+      {played ? (<>
+        {predictPlayed && R && (<>
+          <div className="wc-pred">
+            <div className={"wc-pc" + (R.pH === mx ? " wc-pc-top" : "")}><b>1</b><em>{pct(R.pH)}%</em></div>
+            <div className={"wc-pc" + (R.pD === mx ? " wc-pc-top" : "")}><b>N</b><em>{pct(R.pD)}%</em></div>
+            <div className={"wc-pc" + (R.pA === mx ? " wc-pc-top" : "")}><b>2</b><em>{pct(R.pA)}%</em></div>
+          </div>
+          <div className="wc-kb">Pronostic pré-match · score probable <b>{R.score}</b> · xG {R.lh.toFixed(2)}–{R.la.toFixed(2)}</div>
+        </>)}
         <div className="wc-pred">
           <div className="wc-pc wc-pc-top" style={{ flex: 1 }}><b>Score final</b><em>{m.homeGoals} – {m.awayGoals}</em></div>
         </div>
-      ) : R ? (<>
+      </>) : R ? (<>
         <div className="wc-pred">
           <div className={"wc-pc" + (R.pH === mx ? " wc-pc-top" : "")}><b>1</b><em>{pct(R.pH)}%</em></div>
           <div className={"wc-pc" + (R.pD === mx ? " wc-pc-top" : "")}><b>N</b><em>{pct(R.pD)}%</em></div>
@@ -3118,7 +3371,11 @@ function leagueZone(league, pos) {
   return null;
 }
 function EuropeTab() {
-  const league = "CL";
+  // Compétition affichée : C1 (Ligue des Champions, live) ou C3 (Ligue Europa,
+  // saison 2025-26 figée — aucune source live gratuite, cf. buildEuropaLeague2025).
+  const [comp, setComp] = useState("CL"); // "CL" | "EL"
+  const league = comp;
+  const isEL = comp === "EL";
   const [view, setView] = useState("classement");
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -3128,13 +3385,23 @@ function EuropeTab() {
   const [leagueAvg, setLeagueAvg] = useState(LEAGUE_GOALS_AVG.CL);
   const [up, setUp] = useState([]);
   const [fin, setFin] = useState([]);
-  const club = useClubLineups(league, true);
+  // Compos live seulement pour la C1 : l'EL 2025-26 (figée) n'a pas de compo live
+  // gratuite -> on évite les appels API inutiles (roster/compo).
+  const club = useClubLineups(league, comp === "CL");
   // Cache local (même principe que l'onglet National) : hydrate depuis le dernier
   // résultat, ne réinterroge les API que si cache vide ou ↻ manuel. Clé distincte
-  // `europe:data:CL` pour ne pas entrer en collision avec le cache National (où la
-  // C1 peut aussi être sélectionnée sous la clé `live:data:CL`).
+  // `europe:data:<CODE>` pour ne pas entrer en collision avec le cache National.
   const load = async (force = false) => {
     setErr(null);
+    // --- Ligue Europa : données figées 2025-26 (synchrone, aucun appel réseau) ---
+    if (isEL) {
+      const { teams: tm, fin: fn, leagueAvg: la } = buildEuropaLeague2025();
+      setTeams(tm); setUp([]); setFin(fn); setLeagueAvg(la);
+      setNote("Ligue Europa 2025-26 — phase de ligue terminée (données officielles figées : aucune source live gratuite ne couvre la C3). Le pronostic du modèle est affiché à côté de chaque résultat réel.");
+      setUpdated(new Date()); setLoading(false);
+      return;
+    }
+    // --- Ligue des Champions : live via football-data.org (inchangé) ---
     if (!force) {
       const c = await store.get("europe:data:" + league);
       if (c && c.teams && c.teams.length) {
@@ -3164,7 +3431,7 @@ function EuropeTab() {
         if (!d.teams?.length) noteText = "Phase de ligue pas encore commencée : clubs qualifiés et journées affichés, forces de référence (classement dès les premiers matchs).";
       }
       // Même fusion forces de référence + Elo que l'onglet Match / National.
-      tm = tm.map((t) => blendWithReference("CL", t));
+      tm = tm.map((t) => blendWithReference(league, t));
       let upcoming = [], finished = [];
       try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
       const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG.CL;
@@ -3173,60 +3440,74 @@ function EuropeTab() {
     } catch (e) { setErr(String(e.message || e)); setTeams([]); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(false); }, []);
-  const refreshAll = () => { load(true); club.reloadRoster(); };
+  // Rechargement au changement de compétition (on repart sur le classement).
+  useEffect(() => { setTeams([]); setNote(""); setView("classement"); load(false); }, [comp]);
+  const refreshAll = () => { load(true); if (comp === "CL") club.reloadRoster(); };
   const byId = (id) => teams.find((t) => t.id === id);
-  const rho = LEAGUE_RHO.CL || RHO;
+  const rho = LEAGUE_RHO[comp] || RHO;
   // Journées : matchs à venir + matchs déjà joués (score final) des mêmes journées,
   // comme le National — une journée en cours reste complète (cf. NationalMatchCard).
+  // En EL (saison figée, aucun match « à venir »), on affiche les 8 journées à partir
+  // des matchs terminés.
   const journees = useMemo(() => {
     const byMd = {};
     up.forEach((m) => { const md = m.matchday || 0; (byMd[md] = byMd[md] || []).push(m); });
-    fin.forEach((m) => { const md = m.matchday || 0; if (byMd[md]) byMd[md].push(m); });
+    fin.forEach((m) => { const md = m.matchday || 0; if (isEL) { (byMd[md] = byMd[md] || []).push(m); } else if (byMd[md]) byMd[md].push(m); });
     return Object.keys(byMd).map(Number).sort((x, y) => x - y)
       .map((md) => ({ md, matches: byMd[md].slice().sort((x, y) => new Date(x.date) - new Date(y.date)) }));
-  }, [up, fin]);
-  const cardProps = { league, teamById: byId, leagueAvg, rho, roster: club.roster, comp: club.comp, lastComp: club.lastComp, lineups: club.lineups, onCompChange: club.onCompChange, onCompReset: club.onCompReset, onRefresh: club.loadLineup };
+  }, [up, fin, isEL]);
+  const cardProps = { league, teamById: byId, leagueAvg, rho, predictPlayed: isEL, roster: club.roster, comp: club.comp, lastComp: club.lastComp, lineups: club.lineups, onCompChange: club.onCompChange, onCompReset: club.onCompReset, onRefresh: club.loadLineup };
   const ranked = useMemo(() => teams.slice().sort((a, b) => (a.position || 99) - (b.position || 99) || (b.points || 0) - (a.points || 0)), [teams]);
+  const title = isEL ? "Ligue Europa" : "Ligue des Champions";
+  const zoneTop = isEL ? "8es de finale (1–8)" : "8es directs (1–8)";
   return (
     <>
       <section className="pf-card">
-        <div className="pf-result-head"><Trophy size={15} /> Ligue des Champions — phase de ligue</div>
+        <div className="pf-result-head"><Trophy size={15} /> {title} — phase de ligue</div>
+        <div className="wc-subnav">
+          <button className={comp === "CL" ? "wc-sb on" : "wc-sb"} onClick={() => setComp("CL")}>🏆 Ligue des Champions</button>
+          <button className={comp === "EL" ? "wc-sb on" : "wc-sb"} onClick={() => setComp("EL")}>🥈 Ligue Europa</button>
+        </div>
         <div className="lv-ctrl">
-          <div className="lv-meta" style={{ flex: 1 }}>Format 2025-26 : 36 équipes, un seul classement (8 matchs). 1–8 → 8es directs · 9–24 → barrages · 25–36 → éliminés.</div>
-          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title="Mettre à jour depuis les API (rafraîchit le cache)">{loading ? "…" : "↻"}</button>
+          <div className="lv-meta" style={{ flex: 1 }}>Format 2025-26 : 36 équipes, un seul classement (8 matchs). 1–8 → {isEL ? "8es de finale" : "8es directs"} · 9–24 → barrages · 25–36 → éliminés.</div>
+          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title={isEL ? "Recharger les données figées" : "Mettre à jour depuis les API (rafraîchit le cache)"}>{loading ? "…" : "↻"}</button>
         </div>
         <div className="wc-subnav" style={{ marginTop: 8 }}>
           <button className={view === "classement" ? "wc-sb on" : "wc-sb"} onClick={() => setView("classement")}><Layers size={15} /> Classement</button>
           <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Target size={15} /> Journées</button>
         </div>
-        <div className="lv-meta">{updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger"}</div>
+        <div className="lv-meta">{isEL ? "Saison 2025-26 figée (données officielles)" : (updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger")}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois déployé sur Vercel avec <code>FOOTBALLDATA_TOKEN</code>. L'Europa League n'est pas incluse dans l'offre gratuite.</span></div>}
         {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
       {teams.length > 0 && view === "classement" && (
         <section className="pf-card">
           <div className="pf-result-head">Classement — phase de ligue</div>
-          <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th></tr></thead>
-            <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = clZone(pos); return (
-              <tr key={t.id} className={z ? z.c : ""}>
-                <td>{pos}</td>
-                <td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td>
-                <td>{t.matches}</td>
-                <td className="wc-pts">{t.points != null ? t.points : "—"}</td>
-                <td>{t.goalDifference != null ? (t.goalDifference > 0 ? "+" : "") + t.goalDifference : "—"}</td>
-                <td>{t.goalsFor}</td>
-              </tr>); })}</tbody>
-          </table>
+          <div className="wc-tbl-wrap">
+            <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th><th className="lv-hide-sm">Forme</th></tr></thead>
+              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = clZone(pos); return (
+                <tr key={t.id} className={z ? z.c : ""}>
+                  <td>{pos}</td>
+                  <td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td>
+                  <td>{t.matches}</td>
+                  <td className="wc-pts">{t.points != null ? t.points : "—"}</td>
+                  <td>{t.goalDifference != null ? (t.goalDifference > 0 ? "+" : "") + t.goalDifference : "—"}</td>
+                  <td>{t.goalsFor}</td>
+                  <td className="lv-hide-sm">{t.form ? <FormPills form={parseForm(t.form)} /> : "—"}</td>
+                </tr>); })}</tbody>
+            </table>
+          </div>
           <div className="cl-legend">
-            <span className="cl-lg cl-z1">8es directs (1–8)</span>
+            <span className="cl-lg cl-z1">{zoneTop}</span>
             <span className="cl-lg cl-z2">barrages (9–24)</span>
             <span className="cl-lg cl-z3">éliminés (25–36)</span>
           </div>
         </section>
       )}
       {teams.length > 0 && view === "journees" && (<>
-        <div className="wc-hint">Journées de la phase de ligue : pronostic 1/N/2 par match (forces réelles + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour la compo officielle live (🔴) ou la saisie manuelle.</div>
+        <div className="wc-hint">{isEL
+          ? <>Journées de la phase de ligue : pour chaque match, le <b>pronostic 1/N/2 du modèle</b> (forces dérivées du bilan réel + forme) est affiché à côté du <b>score final réel</b>.</>
+          : <>Journées de la phase de ligue : pronostic 1/N/2 par match (forces réelles + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour la compo officielle live (🔴) ou la saisie manuelle.</>}</div>
         {journees.length ? journees.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
           : <section className="pf-card"><div className="lv-meta">Aucun match à venir renvoyé par l'API (intersaison ?).</div></section>}
       </>)}

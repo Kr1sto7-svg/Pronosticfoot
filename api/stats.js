@@ -24,6 +24,22 @@ export default async function handler(req, res) {
     ? "Limite football-data.org atteinte (10 requêtes/min en gratuit) — réessaie dans quelques secondes."
     : ("football-data.org a répondu HTTP " + r.status);
 
+  /* ---- DIAGNOSTIC PLAN API-Sports / API-Football (?source=afstatus) ----
+   * Renvoie le compte, l'abonnement (plan + fin) et les quotas du jour, afin de
+   * savoir quelles saisons/compétitions la clé débloque. Aucune donnée sensible
+   * (pas la clé elle-même). Utile pour vérifier l'accès à la saison en cours. */
+  if (source === "afstatus") {
+    const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
+    if (!key) return res.status(200).json({ source, hasKey: false, note: "Aucune clé API-Football/API-Sports (API_KEY ou APIFOOTBALL_KEY) configurée." });
+    try {
+      const r = await fetch("https://v3.football.api-sports.io/status", { headers: { "x-apisports-key": key } });
+      const j = await r.json();
+      return res.status(200).json({ source, hasKey: true, response: j.response || null, errors: j.errors || null, raw: j.response ? undefined : j });
+    } catch (e) {
+      return res.status(200).json({ source, hasKey: true, error: String(e.message || e) });
+    }
+  }
+
   /* ---- xG RÉEL via Understat (gratuit, sans clé) : 5 grands championnats ---- */
   /* NB : Understat n'expose pas d'API officielle (JSON intégré au HTML) et ne
      couvre PAS les sélections / la Coupe du Monde. À vérifier après déploiement. */
