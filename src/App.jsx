@@ -578,6 +578,112 @@ function buildEuropaLeague2025() {
   return { teams, fin, leagueAvg };
 }
 
+/* ---------- Ligue Europa 2026-27 — phase de ligue (saison en cours) ----------
+ * Tirage effectué le 28/08/2026 (36 clubs, 4 chapeaux). AUCUNE source live gratuite
+ * ne couvre l'EL en cours -> forces de RÉFÉRENCE codées à la main (échelle clubelo,
+ * même convention qu'EURO_POOL), calibrées sur la qualité réelle du club et non sur
+ * le seul coefficient UEFA (qui sous-note les clubs anglais/allemands peu habitués
+ * à l'Europe : Crystal Palace, Bournemouth, Hoffenheim…). `pot`/`coef` = chapeau et
+ * coefficient officiels. Le calendrier détaillé (144 affiches) est publié le 29-30/08
+ * par l'UEFA : dès dispo, remplir EL_2026_FIXTURES -> journées + pronostics actifs. */
+const EL_2026_TEAMS = [
+  // Chapeau 1
+  { n: "Bayer Leverkusen",    pot: 1, coef: 105.0, elo: 1850, att: 1.15, def: 0.95 },
+  { n: "Benfica",             pot: 1, coef: 90.0,  elo: 1850, att: 1.20, def: 0.88 },
+  { n: "Juventus",            pot: 1, coef: 72.25, elo: 1820, att: 1.05, def: 0.90 },
+  { n: "AC Milan",            pot: 1, coef: 66.0,  elo: 1890, att: 1.12, def: 0.82 },
+  { n: "Lyon",                pot: 1, coef: 65.75, elo: 1760, att: 1.15, def: 0.95 },
+  { n: "AZ Alkmaar",          pot: 1, coef: 62.88, elo: 1680, att: 1.10, def: 1.00 },
+  { n: "Olympiacos",          pot: 1, coef: 62.25, elo: 1740, att: 1.00, def: 1.00 },
+  { n: "Real Sociedad",       pot: 1, coef: 57.0,  elo: 1760, att: 1.05, def: 0.95 },
+  { n: "Marseille",           pot: 1, coef: 54.0,  elo: 1860, att: 1.25, def: 0.92 },
+  // Chapeau 2
+  { n: "Ferencváros",         pot: 2, coef: 51.25, elo: 1680, att: 1.05, def: 1.02 },
+  { n: "Viktoria Plzeň",      pot: 2, coef: 50.5,  elo: 1660, att: 1.00, def: 1.02 },
+  { n: "Union SG",            pot: 2, coef: 48.0,  elo: 1740, att: 1.00, def: 1.00 },
+  { n: "Dinamo Zagreb",       pot: 2, coef: 46.5,  elo: 1660, att: 1.02, def: 1.05 },
+  { n: "Red Bull Salzburg",   pot: 2, coef: 45.0,  elo: 1750, att: 1.08, def: 1.02 },
+  { n: "Celtic",              pot: 2, coef: 44.0,  elo: 1760, att: 1.10, def: 1.00 },
+  { n: "Sparta Prague",       pot: 2, coef: 38.25, elo: 1680, att: 1.05, def: 1.00 },
+  { n: "Rennes",              pot: 2, coef: 35.0,  elo: 1740, att: 1.12, def: 0.98 },
+  { n: "Anderlecht",          pot: 2, coef: 30.75, elo: 1680, att: 1.02, def: 1.02 },
+  // Chapeau 3
+  { n: "Sturm Graz",          pot: 3, coef: 28.0,  elo: 1650, att: 0.95, def: 1.05 },
+  { n: "Lech Poznań",         pot: 3, coef: 27.25, elo: 1620, att: 1.00, def: 1.05 },
+  { n: "Crystal Palace",      pot: 3, coef: 23.9,  elo: 1790, att: 1.10, def: 0.92 },
+  { n: "Bournemouth",         pot: 3, coef: 23.9,  elo: 1780, att: 1.12, def: 0.98 },
+  { n: "Sunderland",          pot: 3, coef: 23.9,  elo: 1700, att: 1.00, def: 1.02 },
+  { n: "Celje",               pot: 3, coef: 23.0,  elo: 1560, att: 0.95, def: 1.10 },
+  { n: "Jagiellonia",         pot: 3, coef: 22.0,  elo: 1600, att: 1.00, def: 1.05 },
+  { n: "Omonia",              pot: 3, coef: 21.25, elo: 1580, att: 0.95, def: 1.08 },
+  { n: "Celta Vigo",          pot: 3, coef: 19.41, elo: 1720, att: 1.10, def: 1.00 },
+  // Chapeau 4
+  { n: "Hoffenheim",          pot: 4, coef: 18.58, elo: 1720, att: 1.10, def: 1.02 },
+  { n: "Beşiktaş",            pot: 4, coef: 15.5,  elo: 1700, att: 1.08, def: 1.02 },
+  { n: "Torreense",           pot: 4, coef: 14.63, elo: 1520, att: 0.90, def: 1.15 },
+  { n: "Hapoel Be'er Sheva",  pot: 4, coef: 14.0,  elo: 1580, att: 0.95, def: 1.08 },
+  { n: "NEC Nijmegen",        pot: 4, coef: 13.59, elo: 1620, att: 1.00, def: 1.05 },
+  { n: "OFI Crete",           pot: 4, coef: 9.68,  elo: 1540, att: 0.90, def: 1.12 },
+  { n: "Lillestrøm",          pot: 4, coef: 8.25,  elo: 1560, att: 0.95, def: 1.10 },
+  { n: "Levski Sofia",        pot: 4, coef: 7.0,   elo: 1560, att: 0.95, def: 1.10 },
+  { n: "Ararat-Armenia",      pot: 4, coef: 7.0,   elo: 1500, att: 0.85, def: 1.18 },
+];
+/* Dates (heure UTC indicative) des 8 journées de la phase de ligue 2026-27. */
+const EL_2026_MD_DATES = {
+  1: "2026-09-16T17:00:00Z", 2: "2026-10-15T17:00:00Z", 3: "2026-10-22T17:00:00Z", 4: "2026-11-05T17:00:00Z",
+  5: "2026-11-26T17:00:00Z", 6: "2026-12-10T17:00:00Z", 7: "2027-01-21T17:00:00Z", 8: "2027-01-28T17:00:00Z",
+};
+/* Calendrier détaillé 2026-27 : { md, h, a } (score ajouté au fil des journées).
+ * VIDE tant que la fixture list UEFA (publiée 29-30/08/2026) n'est pas intégrée. */
+const EL_2026_FIXTURES = [];
+/* Construit l'état de l'onglet Europe pour la C3 2026-27 : `teams` (forces de
+ * référence, 0 match joué), `up`/`fin` dérivés d'EL_2026_FIXTURES (à venir vs
+ * terminés selon présence d'un score). Rejoué à chaque affichage. */
+function buildEuropaLeague2026() {
+  const elId = (name) => "el-" + normName(name).replace(/\s+/g, "-");
+  const leagueAvg = LEAGUE_GOALS_AVG.EL;
+  // Bilan couru depuis les fixtures déjà jouées (score renseigné) -> classement.
+  const stat = {};
+  EL_2026_TEAMS.forEach((t) => { stat[elId(t.n)] = { pts: 0, gf: 0, ga: 0, w: 0, d: 0, l: 0, gp: 0, seq: [] }; });
+  EL_2026_FIXTURES.forEach((m) => {
+    if (m.hg == null || m.ag == null) return;
+    const H = stat[elId(m.h)], A = stat[elId(m.a)]; if (!H || !A) return;
+    H.gf += m.hg; H.ga += m.ag; A.gf += m.ag; A.ga += m.hg; H.gp++; A.gp++;
+    if (m.hg > m.ag) { H.pts += 3; H.w++; A.l++; H.seq.push("W"); A.seq.push("L"); }
+    else if (m.hg < m.ag) { A.pts += 3; A.w++; H.l++; A.seq.push("W"); H.seq.push("L"); }
+    else { H.pts++; A.pts++; H.d++; A.d++; H.seq.push("D"); A.seq.push("D"); }
+  });
+  const anyPlayed = EL_2026_FIXTURES.some((m) => m.hg != null && m.ag != null);
+  // Ordre : classement réel si des matchs sont joués, sinon force de référence (Elo).
+  const ranked = [...EL_2026_TEAMS].sort((a, b) => {
+    const sa = stat[elId(a.n)], sb = stat[elId(b.n)];
+    return sb.pts - sa.pts || (sb.gf - sb.ga) - (sa.gf - sa.ga) || sb.gf - sa.gf || b.elo - a.elo;
+  });
+  const teams = ranked.map((t, i) => {
+    const s = stat[elId(t.n)];
+    return {
+      id: elId(t.n), name: t.n, crest: null, matches: s.gp,
+      position: anyPlayed ? i + 1 : null, points: anyPlayed ? s.pts : null,
+      won: anyPlayed ? s.w : null, draw: anyPlayed ? s.d : null, lost: anyPlayed ? s.l : null,
+      goalsFor: s.gf, goalsAgainst: s.ga, goalDifference: anyPlayed ? s.gf - s.ga : null,
+      att: t.att, def: t.def, elo: t.elo, form: s.seq.join(","),
+    };
+  });
+  const up = [], fin = [];
+  EL_2026_FIXTURES.forEach((m, i) => {
+    const played = m.hg != null && m.ag != null;
+    const row = {
+      id: "el26-m" + m.md + "-" + i, date: EL_2026_MD_DATES[m.md], matchday: m.md,
+      status: played ? "FINISHED" : "TIMED", stage: "LEAGUE_STAGE",
+      home: m.h, away: m.a, homeId: elId(m.h), awayId: elId(m.a),
+      homeGoals: played ? m.hg : null, awayGoals: played ? m.ag : null,
+      winner: played ? (m.hg > m.ag ? "HOME_TEAM" : m.hg < m.ag ? "AWAY_TEAM" : "DRAW") : null,
+    };
+    (played ? fin : up).push(row);
+  });
+  return { teams, up, fin, leagueAvg };
+}
+
 /* Classement FIFA officiel (juin 2025) — utilisé pour affiner Elo + att/def. */
 const FIFA_RANK = {
   "Argentine":1,"France":2,"Espagne":3,"Angleterre":4,"Brésil":5,
@@ -3393,11 +3499,14 @@ function EuropeTab() {
   // `europe:data:<CODE>` pour ne pas entrer en collision avec le cache National.
   const load = async (force = false) => {
     setErr(null);
-    // --- Ligue Europa : données figées 2025-26 (synchrone, aucun appel réseau) ---
+    // --- Ligue Europa 2026-27 : forces de référence codées (aucun appel réseau).
+    // Tirage fait ; calendrier détaillé intégré au fur et à mesure (EL_2026_FIXTURES). ---
     if (isEL) {
-      const { teams: tm, fin: fn, leagueAvg: la } = buildEuropaLeague2025();
-      setTeams(tm); setUp([]); setFin(fn); setLeagueAvg(la);
-      setNote("Ligue Europa 2025-26 — phase de ligue terminée (données officielles figées : aucune source live gratuite ne couvre la C3). Le pronostic du modèle est affiché à côté de chaque résultat réel.");
+      const { teams: tm, up: u, fin: fn, leagueAvg: la } = buildEuropaLeague2026();
+      setTeams(tm); setUp(u); setFin(fn); setLeagueAvg(la);
+      setNote(u.length || fn.length
+        ? "Ligue Europa 2026-27 — phase de ligue. Forces de référence (aucune source live gratuite pour la C3) ; pronostic du modèle par match. Le classement se remplit au fil des journées."
+        : "Ligue Europa 2026-27 — tirage effectué (28/08), 36 clubs et forces de référence prêts. Le calendrier détaillé UEFA (publié 29-30/08) sera intégré très bientôt : les journées et pronostics apparaîtront alors. Classement réel dès la J1 (16-17 sept.).");
       setUpdated(new Date()); setLoading(false);
       return;
     }
@@ -3458,6 +3567,7 @@ function EuropeTab() {
   }, [up, fin, isEL]);
   const cardProps = { league, teamById: byId, leagueAvg, rho, predictPlayed: isEL, roster: club.roster, comp: club.comp, lastComp: club.lastComp, lineups: club.lineups, onCompChange: club.onCompChange, onCompReset: club.onCompReset, onRefresh: club.loadLineup };
   const ranked = useMemo(() => teams.slice().sort((a, b) => (a.position || 99) - (b.position || 99) || (b.points || 0) - (a.points || 0)), [teams]);
+  const started = teams.some((t) => (t.matches || 0) > 0); // phase de ligue commencée ?
   const title = isEL ? "Ligue Europa" : "Ligue des Champions";
   const zoneTop = isEL ? "8es de finale (1–8)" : "8es directs (1–8)";
   return (
@@ -3469,23 +3579,24 @@ function EuropeTab() {
           <button className={comp === "EL" ? "wc-sb on" : "wc-sb"} onClick={() => setComp("EL")}>🥈 Ligue Europa</button>
         </div>
         <div className="lv-ctrl">
-          <div className="lv-meta" style={{ flex: 1 }}>Format 2025-26 : 36 équipes, un seul classement (8 matchs). 1–8 → {isEL ? "8es de finale" : "8es directs"} · 9–24 → barrages · 25–36 → éliminés.</div>
-          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title={isEL ? "Recharger les données figées" : "Mettre à jour depuis les API (rafraîchit le cache)"}>{loading ? "…" : "↻"}</button>
+          <div className="lv-meta" style={{ flex: 1 }}>Format{isEL ? " 2026-27" : ""} : 36 équipes, un seul classement (8 matchs). 1–8 → {isEL ? "8es de finale" : "8es directs"} · 9–24 → barrages · 25–36 → éliminés.</div>
+          <button className="lv-refresh" onClick={refreshAll} disabled={loading} title={isEL ? "Recharger les données de référence" : "Mettre à jour depuis les API (rafraîchit le cache)"}>{loading ? "…" : "↻"}</button>
         </div>
         <div className="wc-subnav" style={{ marginTop: 8 }}>
           <button className={view === "classement" ? "wc-sb on" : "wc-sb"} onClick={() => setView("classement")}><Layers size={15} /> Classement</button>
           <button className={view === "journees" ? "wc-sb on" : "wc-sb"} onClick={() => setView("journees")}><Target size={15} /> Journées</button>
         </div>
-        <div className="lv-meta">{isEL ? "Saison 2025-26 figée (données officielles)" : (updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger")}</div>
+        <div className="lv-meta">{isEL ? "Saison 2026-27 · forces de référence (pas de source live gratuite pour la C3)" : (updated ? "Dernière MAJ " + updated.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + updated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) + " · en cache · ↻ pour actualiser" : "Aucune donnée en cache — clique ↻ pour charger")}</div>
         {err && <div className="lv-err">⚠️ {err}<br /><span>Le proxy <code>/api/stats</code> répond une fois déployé sur Vercel avec <code>FOOTBALLDATA_TOKEN</code>. L'Europa League n'est pas incluse dans l'offre gratuite.</span></div>}
         {note && !err && <div className="lv-meta">ℹ️ {note}</div>}
       </section>
       {teams.length > 0 && view === "classement" && (
         <section className="pf-card">
-          <div className="pf-result-head">Classement — phase de ligue</div>
+          <div className="pf-result-head">Classement — phase de ligue{isEL && !started ? " (projeté)" : ""}</div>
+          {isEL && !started && <div className="lv-meta">Phase de ligue pas encore commencée — ordre projeté par force de référence (Elo). Le classement réel s'affiche dès la J1.</div>}
           <div className="wc-tbl-wrap">
             <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th><th className="lv-hide-sm">Forme</th></tr></thead>
-              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = clZone(pos); return (
+              <tbody>{ranked.map((t, i) => { const pos = t.position || (i + 1); const z = started ? clZone(pos) : null; return (
                 <tr key={t.id} className={z ? z.c : ""}>
                   <td>{pos}</td>
                   <td className="wc-tn">{isLyon(t.name) ? "⭐ " : ""}{short(t.name)}</td>
@@ -3497,19 +3608,21 @@ function EuropeTab() {
                 </tr>); })}</tbody>
             </table>
           </div>
-          <div className="cl-legend">
+          {started && <div className="cl-legend">
             <span className="cl-lg cl-z1">{zoneTop}</span>
             <span className="cl-lg cl-z2">barrages (9–24)</span>
             <span className="cl-lg cl-z3">éliminés (25–36)</span>
-          </div>
+          </div>}
         </section>
       )}
       {teams.length > 0 && view === "journees" && (<>
         <div className="wc-hint">{isEL
-          ? <>Journées de la phase de ligue : pour chaque match, le <b>pronostic 1/N/2 du modèle</b> (forces dérivées du bilan réel + forme) est affiché à côté du <b>score final réel</b>.</>
+          ? <>Journées de la phase de ligue : <b>pronostic 1/N/2 du modèle</b> par match (forces de référence + forme). Pour un match déjà joué, le pronostic pré-match est affiché à côté du <b>score réel</b>.</>
           : <>Journées de la phase de ligue : pronostic 1/N/2 par match (forces réelles + forme + <b>composition/formation</b>). Déplie « 🧩 Compositions » pour la compo officielle live (🔴) ou la saisie manuelle.</>}</div>
         {journees.length ? journees.map((j, i) => <JourneeCard key={j.md} j={j} defOpen={i === 0} {...cardProps} />)
-          : <section className="pf-card"><div className="lv-meta">Aucun match à venir renvoyé par l'API (intersaison ?).</div></section>}
+          : <section className="pf-card"><div className="lv-meta">{isEL
+            ? "Calendrier 2026-27 pas encore intégré (fixture list UEFA publiée le 29-30/08) — les journées et les pronostics apparaîtront dès son intégration."
+            : "Aucun match à venir renvoyé par l'API (intersaison ?)."}</div></section>}
       </>)}
     </>
   );
