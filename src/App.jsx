@@ -17,6 +17,18 @@ const ELO_BETA = 0.25; // poids de l'écart Elo sur les xG : ±400 Elo ≈ ×1.2
 const WC_AVG = 1.18;
 const LEAGUE_GOALS_AVG = { PL: 1.38, PD: 1.30, BL1: 1.57, SA: 1.28, FL1: 1.35, CL: 1.40, EL: 1.34, DED: 1.45, PPL: 1.32, WC: 1.18, EC: 1.20 };
 const LEAGUE_RHO = { PL: -0.12, PD: -0.11, BL1: -0.10, SA: -0.15, FL1: -0.12, CL: -0.13, EL: -0.13, DED: -0.11, PPL: -0.12, WC: -0.08, EC: -0.09 };
+/* Avantage du terrain PAR compétition, appliqué aux lambdas UNIQUEMENT quand on n'a
+ * pas de split domicile/extérieur réel (début de saison, sélections, clubs sans
+ * historique) — sinon les splits de l'API priment. h = multiplicateur domicile,
+ * a = extérieur. La Liga/Primeira = avantage marqué ; Premier League = plus faible
+ * (bien documenté) ; sélections (WC/EC/NL) = modéré. Défaut = HOME_MULT/AWAY_MULT. */
+const LEAGUE_HOME_ADV = {
+  PL:  { h: 1.14, a: 0.94 }, PD:  { h: 1.20, a: 0.90 }, BL1: { h: 1.15, a: 0.93 },
+  SA:  { h: 1.16, a: 0.92 }, FL1: { h: 1.16, a: 0.92 }, DED: { h: 1.17, a: 0.92 },
+  PPL: { h: 1.20, a: 0.90 }, CL:  { h: 1.15, a: 0.91 }, EL:  { h: 1.16, a: 0.90 },
+  WC:  { h: 1.10, a: 0.95 }, EC:  { h: 1.12, a: 0.94 }, NL:  { h: 1.12, a: 0.93 },
+};
+const homeAdvFor = (code) => LEAGUE_HOME_ADV[code] || { h: HOME_MULT, a: AWAY_MULT };
 const LETTERS = "ABCDEFGHIJKL".split("");
 /* Calendrier OFFICIEL des matchs de groupes (FIFA), dans l'ordre chronologique réel.
  * x / y = position des équipes dans GROUPS_2026 (orientation domicile/extérieur officielle) ;
@@ -928,7 +940,7 @@ function dcTau(i, j, lh, la, rho = RHO) {
   else if (i === 1 && j === 1) t = 1 - rho;
   return Math.max(0, t); // une correction DC ne doit jamais produire une probabilité négative
 }
-function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
+function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO, homeAdv = null) {
   const fh = formScore(home.form), fa = formScore(away.form);
   const useSplit = !neutral && home.homeAtt != null && away.awayDef != null;
   let attH, defH, attA, defA;
@@ -944,12 +956,22 @@ function predict(home, away, neutral, leagueAvg = BASE_GOALS, rho = RHO) {
     defA = away.def * (1 - 0.05 * fa);
   }
   let lh = leagueAvg * attH * defA, la = leagueAvg * attA * defH;
-  if (!neutral && !useSplit) { lh *= HOME_MULT; la *= AWAY_MULT; }
-  // Écart Elo : signal de force complémentaire aux ratings att/def.
+  if (!neutral && !useSplit) { const ha = homeAdv || { h: HOME_MULT, a: AWAY_MULT }; lh *= ha.h; la *= ha.a; }
+  // Écart Elo : signal COMPLÉMENTAIRE aux ratings att/def. On n'utilise que le
+  // RÉSIDU (Elo réel − Elo reconstruit depuis att/def) pour ne pas compter deux
+  // fois la même force : un Elo synthétique (dérivé de att/def via eloFromRatings)
+  // a un résidu nul et n'ajoute rien ; un vrai Elo (Mondial, Ligue des Nations,
+  // clubs de référence, EL codée) n'apporte que l'info non contenue dans les buts.
   if (home.elo != null && away.elo != null) {
-    const f = Math.exp(ELO_BETA * (home.elo - away.elo) / 400);
+    const resH = home.elo - eloFromRatings(home.att, home.def);
+    const resA = away.elo - eloFromRatings(away.att, away.def);
+    const f = Math.exp(ELO_BETA * (resH - resA) / 400);
     lh *= f; la /= f;
   }
+  // Garde-fou : les multiplicateurs cumulés (forme + compo + Elo + avantage
+  // terrain) ne doivent pas produire un lambda irréaliste qui perdrait de la masse
+  // de probabilité au-delà de MAXG buts (la matrice de scores est bornée).
+  lh = Math.max(0.02, Math.min(7, lh)); la = Math.max(0.02, Math.min(7, la));
   let pH = 0, pD = 0, pA = 0, over25 = 0, btts = 0;
   let bestH = null, bestD = null, bestA = null;
   const scores = [];
@@ -1019,8 +1041,8 @@ function h2hEmpirical(homeName, meetings) {
 }
 // 1/N/2 enrichi : forces de la saison + forme récente (via predict) + confrontations directes.
 // neutral=false par défaut : le 1er argument est l'équipe qui REÇOIT (avantage domicile).
-function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = RHO, neutral = false) {
-  const base = predict(home, away, neutral, leagueAvg, rho);
+function predictWithHistory(home, away, meetings, leagueAvg = BASE_GOALS, rho = RHO, neutral = false, homeAdv = null) {
+  const base = predict(home, away, neutral, leagueAvg, rho, homeAdv);
   const emp = meetings && meetings.length ? h2hEmpirical(home.name, meetings) : null;
   if (!emp || emp.n < 3) return { R: base, h2hN: emp ? emp.n : 0, w: 0 };
   const w = Math.min(0.22, emp.n * 0.035); // poids croissant, plafonné (le H2H reste peu fiable)
@@ -1842,7 +1864,7 @@ function MatchCalendar({ league, pool, leagueAvg, rho, club, nonce = 0 }) {
     const c = club.comp[t.n]; const man = c && (c.xi || c.formation || c.remanie);
     return applyLineupF({ ...t }, compFactor(man ? c : (club.lastComp[t.n] || defaultComp(t)), club.roster[t.n] || []));
   };
-  const pred = (m) => { const h = byName(m.home), a = byName(m.away); if (!h || !a) return null; return predict(lf(h), lf(a), false, leagueAvg, rho); };
+  const pred = (m) => { const h = byName(m.home), a = byName(m.away); if (!h || !a) return null; return predict(lf(h), lf(a), false, leagueAvg, rho, homeAdvFor(league)); };
   if (!league) return null;
   return (
     <section className="pf-card">
@@ -1981,7 +2003,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
       H = applyLineupF(H, one(home.n, home, club.comp[home.n], luReady ? luM.home : null));
       A = applyLineupF(A, one(away.n, away, club.comp[away.n], luReady ? luM.away : null));
     }
-    const p = predict(H, A, neutral, leagueAvg, rho);
+    const p = predict(H, A, neutral, leagueAvg, rho, homeAdvFor(liveLeagueCode));
     // Clubs : blend H2H multi-saisons (mêmes seuil n>=3 et poids que predictWithHistory).
     if (scope !== "intl") {
       if (!clubH2h.length) return p;
@@ -2936,7 +2958,7 @@ function NLGroupCard({ gi, label, group, results, pool, poolByName, comp, lastCo
     const ht = poolByName[hn], at = poolByName[an];
     if (!ht || !at) return null;
     const H = applyLineupF({ ...ht }, lineFactor(hn, ht)), A = applyLineupF({ ...at }, lineFactor(an, at));
-    let p = predict(H, A, false, leagueAvg, rho);
+    let p = predict(H, A, false, leagueAvg, rho, homeAdvFor("NL"));
     const h2h = getH2HFromIntl(intlMatches, hn, an);
     if (h2h.length >= 2) {
       let hw = 0, dr = 0, aw = 0; h2h.forEach((m) => { if (m.hg > m.ag) hw++; else if (m.hg < m.ag) aw++; else dr++; });
@@ -3198,7 +3220,7 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, predictPlayed 
     const fA = one(frA, aw, comp[frA], luReady ? lu.away : null);
     const home = applyLineupF({ ...hh, form: parseForm(hh.form) }, fH);
     const away = applyLineupF({ ...aw, form: parseForm(aw.form) }, fA);
-    return predict(home, away, false, leagueAvg, rho);
+    return predict(home, away, false, leagueAvg, rho, homeAdvFor(league));
   }, [hh, aw, comp[frH], comp[frA], lastComp[frH], lastComp[frA], lu, leagueAvg, rho]);
   const lyon = isLyon(frH) || isLyon(frA);
   const mx = R ? Math.max(R.pH, R.pD, R.pA) : 0;
@@ -3286,6 +3308,73 @@ function FinishedJournees({ journees, cardProps }) {
         {journees.map((j) => <JourneeCard key={j.md} j={j} defOpen={false} {...cardProps} />)}
       </div>}
     </div>
+  );
+}
+/* ---------- Calibration du modèle (score de Brier sur les journées passées) ----------
+ * Mesure OBJECTIVE de la qualité des probabilités : pour chaque match TERMINÉ dont on
+ * connaît les forces des deux équipes, on recalcule le pronostic 1/N/2 et on le compare
+ * au résultat réel. Indicateurs :
+ *   - Brier multiclasse = moyenne de Σ(p − issue)² sur les 3 issues (0 = parfait ;
+ *     ~0.66 = tirage au sort). Plus BAS = mieux.
+ *   - log-loss (pénalise fort les certitudes trompeuses).
+ *   - taux de réussite = l'issue la PLUS probable est-elle sortie ?
+ * Comparés à une base NAÏVE (fréquences moyennes 1/N/2, favori = domicile) : si le modèle
+ * fait mieux que la base, il apporte de la valeur.
+ * ⚠️ Biais optimiste léger : les forces actuelles incluent ces matchs (ce n'est pas une
+ * vraie prédiction hors-échantillon). Indicateur de tendance, pas une validation stricte. */
+const BASE_RATE = { pH: 0.45, pD: 0.27, pA: 0.28 };
+function calibrationStats(finished, predictFor) {
+  let n = 0, brier = 0, brierB = 0, logloss = 0, acc = 0, accB = 0;
+  const EPS = 1e-9;
+  for (const m of finished || []) {
+    if (m.homeGoals == null || m.awayGoals == null) continue;
+    const p = predictFor(m);
+    if (!p) continue;
+    const oH = m.homeGoals > m.awayGoals ? 1 : 0, oD = m.homeGoals === m.awayGoals ? 1 : 0, oA = m.homeGoals < m.awayGoals ? 1 : 0;
+    n++;
+    brier += (p.pH - oH) ** 2 + (p.pD - oD) ** 2 + (p.pA - oA) ** 2;
+    brierB += (BASE_RATE.pH - oH) ** 2 + (BASE_RATE.pD - oD) ** 2 + (BASE_RATE.pA - oA) ** 2;
+    logloss += -Math.log(Math.max(EPS, oH ? p.pH : oD ? p.pD : p.pA));
+    const top = p.pH >= p.pD && p.pH >= p.pA ? "H" : p.pA >= p.pD ? "A" : "D";
+    if (top === (oH ? "H" : oD ? "D" : "A")) acc++;
+    if (oH) accB++; // base naïve : parier systématiquement sur le domicile
+  }
+  if (!n) return null;
+  return { n, brier: brier / n, brierBase: brierB / n, logloss: logloss / n, acc: acc / n, accBase: accB / n };
+}
+/* Carte de calibration : recalcule le pronostic express (mêmes forces que les journées)
+ * sur les matchs terminés et affiche Brier / log-loss / réussite vs base naïve. */
+function CalibrationCard({ finished, teamById, leagueAvg, rho, league }) {
+  const stats = useMemo(() => {
+    const predictFor = (m) => {
+      const hh = teamById(m.homeId), aw = teamById(m.awayId);
+      if (!hh || !aw) return null;
+      return predict({ ...hh, form: parseForm(hh.form) }, { ...aw, form: parseForm(aw.form) }, false, leagueAvg, rho, homeAdvFor(league));
+    };
+    return calibrationStats(finished, predictFor);
+  }, [finished, leagueAvg, rho, league]);
+  if (!stats || stats.n < 5) return (
+    <section className="pf-card"><div className="pf-result-head">📊 Calibration du modèle</div>
+      <div className="lv-meta">Pas assez de matchs terminés cette saison pour mesurer la calibration (minimum 5). Reviens après quelques journées.</div></section>
+  );
+  const better = stats.brier < stats.brierBase;
+  const gain = ((stats.brierBase - stats.brier) / stats.brierBase) * 100;
+  return (
+    <section className="pf-card">
+      <div className="pf-result-head">📊 Calibration du modèle — {stats.n} matchs terminés</div>
+      <div className="pf-tiles">
+        <OutcomeTile label="Score de Brier" value={stats.brier.toFixed(3)} kind={better ? "h" : "a"} />
+        <OutcomeTile label="Base naïve" value={stats.brierBase.toFixed(3)} kind="d" />
+        <OutcomeTile label="Réussite 1/N/2" value={pct(stats.acc) + "%"} kind="h" />
+      </div>
+      <div className="lv-meta">
+        {better
+          ? "✅ Le modèle bat la base naïve de " + gain.toFixed(0) + "% (Brier plus bas = mieux ; 0 = parfait, 0.66 = hasard)."
+          : "⚠️ Le modèle ne fait pas mieux que la base naïve (fréquences moyennes) sur cet échantillon."}
+        {" "}log-loss {stats.logloss.toFixed(3)} · réussite base (tout domicile) {pct(stats.accBase)}%.
+      </div>
+      <div className="lv-meta">⚠️ Indicateur : les forces actuelles incluent ces matchs (léger biais optimiste), ce n'est pas une validation hors-échantillon stricte.</div>
+    </section>
   );
 }
 function LiveTab() {
@@ -3419,7 +3508,7 @@ function LiveTab() {
   const analyseLu = ta && tb && a !== b ? lineups[lineupKey(clubFrName(league, ta.name), clubFrName(league, tb.name))] : null;
   const analyseLuOk = analyseLu && analyseLu.state === "ok" && analyseLu.ready;
   const hist = ta && tb && a !== b
-    ? predictWithHistory(effClub(ta, analyseLuOk ? analyseLu.home : null), effClub(tb, analyseLuOk ? analyseLu.away : null), h2h, leagueAvg, LEAGUE_RHO[league] || RHO)
+    ? predictWithHistory(effClub(ta, analyseLuOk ? analyseLu.home : null), effClub(tb, analyseLuOk ? analyseLu.away : null), h2h, leagueAvg, LEAGUE_RHO[league] || RHO, false, homeAdvFor(league))
     : null;
   const R = hist ? hist.R : null;
   // Confrontations directes : seulement en vue « analyse » (un match sélectionné)
@@ -3463,13 +3552,13 @@ function LiveTab() {
   const fixtureProbs = (m) => {
     const hh = byId(m.homeId), aw = byId(m.awayId);
     if (!hh || !aw) return null;
-    return predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO);
+    return predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO, homeAdvFor(league));
   };
   // Value = proba modèle × meilleure cote. > 1,05 -> le modèle voit de la valeur.
   const oddsValue = (ev) => {
     const hh = byName(ev.home), aw = byName(ev.away);
     if (!hh || !aw) return null;
-    const p = predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO);
+    const p = predict(effClub(hh), effClub(aw), false, leagueAvg, LEAGUE_RHO[league] || RHO, homeAdvFor(league));
     const v = [
       { k: "1", lbl: short(ev.home), ev: p.pH * ev.oddsH, pm: p.pH },
       { k: "N", lbl: "Nul", ev: p.pD * ev.oddsD, pm: p.pD },
@@ -3528,6 +3617,9 @@ function LiveTab() {
           </div>}
           <div className="lv-meta">Classement officiel de la saison en cours (source football-data.org). ⭐ Lyon surligné.{LEAGUE_ZONES[league] ? " Zones européennes/relégation indicatives (varient selon coefficients UEFA & coupes)." : ""}</div>
         </section>
+      )}
+      {teams.length > 0 && view === "classement" && (
+        <CalibrationCard finished={fin} teamById={teamById} leagueAvg={leagueAvg} rho={rho} league={league} />
       )}
       {teams.length > 0 && view === "journees" && (<>
         <div className="wc-hint">Tableau des <b>journées</b> : pronostic 1/N/2 par match (forces réelles de la saison + forme + <b>composition/formation</b> + <b>historique des journées passées</b>). Les journées terminées restent en mémoire (section ✅) et alimentent les probabilités. Déplie « 🧩 Compositions » pour ajuster le XI — la <b>compo officielle live</b> (bouton 🔴) et la dernière compo connue sont reprises automatiquement. ⭐ Lyon est mis en avant.</div>
@@ -3768,6 +3860,9 @@ function EuropeTab() {
             <span className="cl-lg cl-z3">éliminés (25–36)</span>
           </div>}
         </section>
+      )}
+      {teams.length > 0 && view === "classement" && (
+        <CalibrationCard finished={fin} teamById={byId} leagueAvg={leagueAvg} rho={rho} league={league} />
       )}
       {teams.length > 0 && view === "journees" && (<>
         <div className="wc-hint">{isEL
