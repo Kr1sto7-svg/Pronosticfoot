@@ -1716,10 +1716,8 @@ async function fetchClubLive(league, force = false) {
   if (!force && clubLiveCache[league]) return clubLiveCache[league];
   // Cache persistant (store) : réutilisé au remontage/reload sans réinterroger les
   // API. Seul un rafraîchissement manuel (force=true) relance les appels.
-  if (!force) {
-    const cached = await store.get("match:live:" + league);
-    if (cached && cached.teams && cached.teams.length) { clubLiveCache[league] = cached; return cached; }
-  }
+  const prev = await store.get("match:live:" + league);
+  if (!force && prev && prev.teams && prev.teams.length) { clubLiveCache[league] = prev; return prev; }
   const [sr, tr] = await Promise.all([
     fetch("/api/stats?source=footballdata&league=" + league).catch(() => null),
     fetch("/api/stats?source=teams&league=" + league).catch(() => null),
@@ -1727,8 +1725,14 @@ async function fetchClubLive(league, force = false) {
   const d = sr && sr.ok ? await sr.json() : { teams: [] };
   const tj = tr && tr.ok ? await tr.json() : { teams: [] };
   const clubs = (tj.teams || []).map((t) => ({ name: t.name, id: t.id, fr: clubFrName(league, t.name) }));
-  if ((!d.teams || !d.teams.length) && !clubs.length) throw new Error("Aucune donnée");
+  // Échec API (429 quota) : on CONSERVE le dernier cache connu au lieu d'échouer/vider.
+  if ((!d.teams || !d.teams.length) && !clubs.length) {
+    if (prev && prev.teams && prev.teams.length) { clubLiveCache[league] = prev; return prev; }
+    throw new Error("Aucune donnée");
+  }
   let teams = d.teams || [], xgOn = false;
+  // Forces (classement) vides mais liste des clubs OK : on garde les dernières forces connues.
+  if (!teams.length && prev && prev.teams && prev.teams.length) teams = prev.teams;
   try {
     const xr = await fetch("/api/stats?source=understat&league=" + league);
     const xd = await xr.json();
@@ -1744,7 +1748,12 @@ async function fetchClubLive(league, force = false) {
       });
     }
   } catch { /* repli silencieux sur les forces basées sur les buts */ }
-  const out = { teams, clubs, xgOn, leagueAvg: d.leagueAvg };
+  const out = {
+    teams,
+    clubs: clubs.length ? clubs : (prev && prev.clubs) || [],
+    xgOn,
+    leagueAvg: d.leagueAvg != null ? d.leagueAvg : (prev && prev.leagueAvg),
+  };
   clubLiveCache[league] = out;
   await store.set("match:live:" + league, out);
   return out;
@@ -1809,13 +1818,74 @@ async function fetchLeagueFixtures(league, force = false) {
     const cached = await store.get("match:fix:" + league);
     if (cached && (cached.finished || cached.upcoming)) { clubFixturesCache[league] = cached; return cached; }
   }
+  const prev = await store.get("match:fix:" + league);
   const r = await fetch("/api/stats?source=matches&league=" + league + "&all=1");
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  // 429/échec : on conserve le dernier calendrier connu plutôt que d'échouer/vider.
+  if (!r.ok) { if (prev && (prev.finished || prev.upcoming)) { clubFixturesCache[league] = prev; return prev; } throw new Error("HTTP " + r.status); }
   const d = await r.json();
-  const out = { finished: d.finished || [], upcoming: d.upcoming || [] };
+  let out = { finished: d.finished || [], upcoming: d.upcoming || [] };
+  if (!out.finished.length && !out.upcoming.length && prev && (prev.finished || prev.upcoming)) out = prev;
   clubFixturesCache[league] = out;
   await store.set("match:fix:" + league, out);
   return out;
+}
+/* Résultats récents d'un club (toutes compétitions) pour l'onglet Match.
+ * Cache module + store (même politique anti-quota que fetchClubLive/fetchLeagueFixtures :
+ * un seul appel par équipe/session, réutilisé au remontage ; refetch au ↻ manuel).
+ * Sur échec API (429) : on garde les derniers matchs connus (demande utilisateur). */
+const teamMatchesCache = {};
+async function fetchTeamMatches(teamId, force = false) {
+  if (!teamId) return [];
+  if (!force && teamMatchesCache[teamId]) return teamMatchesCache[teamId];
+  const prev = await store.get("match:tmf:" + teamId);
+  if (!force && prev && prev.matches) { teamMatchesCache[teamId] = prev.matches; return prev.matches; }
+  try {
+    const r = await fetch("/api/stats?source=teammatches&team=" + teamId + "&limit=14");
+    if (!r.ok) return (prev && prev.matches) || [];
+    const d = await r.json();
+    const matches = d.matches || [];
+    if (!matches.length && prev && prev.matches) return prev.matches;
+    teamMatchesCache[teamId] = matches;
+    await store.set("match:tmf:" + teamId, { matches, updated: Date.now() });
+    return matches;
+  } catch { return (prev && prev.matches) || []; }
+}
+// Codes football-data des compétitions européennes de clubs (C1/C3/C4).
+const EURO_COMP_CODES = new Set(["CL", "EL", "UCL", "ECL", "UECL"]);
+const isEuroComp = (m) => EURO_COMP_CODES.has(m.comp) || /uefa|champions|europa|conference/i.test(m.compName || "");
+/* À partir des matchs récents d'un club (toutes compétitions), calcule :
+ *  - `seq` : forme W/D/L des 6 derniers matchs (momentum, toutes compétitions confondues) ;
+ *  - `attMul`/`defMul` : léger ajustement des forces issu des SEULS matchs EUROPÉENS
+ *    (les résultats de championnat sont déjà dans le classement -> pas de double compte ;
+ *    on n'ajoute donc que la dimension « Europe »), pondéré par la récence et borné.
+ * teamId identifie le club ; leagueAvg = moyenne de buts de la compétition affichée. */
+function crossCompForm(teamId, matches, leagueAvg) {
+  if (!teamId || !matches || !matches.length) return null;
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const mine = matches
+    .filter((m) => m.homeId === teamId || m.awayId === teamId)
+    .slice()
+    .sort((a, b) => new Date(a.date) - new Date(b.date)); // chronologique (ancien -> récent)
+  if (!mine.length) return null;
+  const resOf = (m) => { const home = m.homeId === teamId; const gf = home ? m.hg : m.ag, ga = home ? m.ag : m.hg; return gf > ga ? "W" : gf < ga ? "L" : "D"; };
+  const seq = mine.slice(-6).map(resOf);
+  const euro = mine.filter(isEuroComp);
+  let attMul = 1, defMul = 1;
+  if (euro.length) {
+    let wSum = 0, gfSum = 0, gaSum = 0;
+    euro.forEach((m, i) => {
+      const home = m.homeId === teamId;
+      const gf = home ? m.hg : m.ag, ga = home ? m.ag : m.hg;
+      const w = Math.pow(0.85, euro.length - 1 - i); // récent = plus lourd
+      wSum += w; gfSum += w * gf; gaSum += w * ga;
+    });
+    const avg = leagueAvg || BASE_GOALS;
+    const rFor = clamp((gfSum / wSum) / avg, 0.5, 1.8), rAg = clamp((gaSum / wSum) / avg, 0.5, 1.8);
+    const wBlend = Math.min(0.18, euro.length * 0.05); // 5%/match européen, plafond 18%
+    attMul = Math.pow(rFor, wBlend);
+    defMul = Math.pow(rAg, wBlend);
+  }
+  return { seq, attMul, defMul, euroN: euro.length, n: mine.length };
 }
 function useLeagueFixtures(league, nonce = 0) {
   const [data, setData] = useState({ finished: [], upcoming: [] });
@@ -1967,6 +2037,8 @@ function MatchTab({ intlMatches = [], matchRequest }) {
     try { const d = await fetchClubLive(lg, true); setLiveClub((p) => ({ ...p, [lg]: d })); setLiveState("ok"); }
     catch { setLiveState("err"); }
     try { await fetchLeagueFixtures(compLeague, true); } catch { /* calendrier indisponible */ }
+    // Force aussi le rechargement des résultats récents (forme championnat + Europe).
+    try { if (home && home.id) await fetchTeamMatches(home.id, true); if (away && away.id) await fetchTeamMatches(away.id, true); } catch { /* indispo */ }
     club.reloadRoster();
     setFixNonce((n) => n + 1);
   };
@@ -1990,12 +2062,35 @@ function MatchTab({ intlMatches = [], matchRequest }) {
       .catch(() => {});
     return () => { on = false; };
   }, [scope, same, home && home.id, away && away.id]);
+  // CLUBS : résultats récents des deux équipes TOUTES compétitions (championnat +
+  // Coupe d'Europe C1/C3). Alimente la forme (momentum) et un léger ajustement Europe
+  // des forces -> le pronostic tient compte des résultats en championnat ET en Europe.
+  const [cxForm, setCxForm] = useState({});
+  useEffect(() => {
+    if (scope === "intl" || same) { setCxForm({}); return; }
+    const ids = [home && home.id, away && away.id].filter(Boolean);
+    if (!ids.length) { setCxForm({}); return; }
+    let on = true;
+    Promise.all(ids.map(async (id) => [id, await fetchTeamMatches(id)]))
+      .then((pairs) => {
+        if (!on) return;
+        const next = {};
+        pairs.forEach(([id, ms]) => { const cx = crossCompForm(id, ms, leagueAvg); if (cx) next[id] = cx; });
+        setCxForm(next);
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [scope, same, home && home.id, away && away.id, leagueAvg, fixNonce]);
   const R = useMemo(() => {
     if (same) return null;
     let H = applyRisk(home, homeRisk), A = applyRisk(away, awayRisk);
     // National & Europe : la composition/formation (live > saisie > dernière connue >
     // défaut) ajuste attaque/défense de chaque équipe avant le calcul.
     if (scope !== "intl") {
+      // Forme récente toutes compétitions (momentum) + nudge Europe des forces.
+      const cxH = cxForm[home.id], cxA = cxForm[away.id];
+      if (cxH) H = { ...H, att: H.att * cxH.attMul, def: H.def * cxH.defMul, form: cxH.seq.length ? cxH.seq : H.form };
+      if (cxA) A = { ...A, att: A.att * cxA.attMul, def: A.def * cxA.defMul, form: cxA.seq.length ? cxA.seq : A.form };
       const one = (fr, teamObj, c, live) => {
         const man = c && (c.xi || c.formation || c.remanie);
         return compFactor(man ? c : (liveToComp(live) || club.lastComp[fr] || defaultComp(teamObj)), club.roster[fr] || []);
@@ -2031,7 +2126,7 @@ function MatchTab({ intlMatches = [], matchRequest }) {
     const pH = (p.pH * (1 - w) + (hw / n) * w), pD = (p.pD * (1 - w) + (dr / n) * w), pA = (p.pA * (1 - w) + (aw / n) * w);
     const s = pH + pD + pA || 1;
     return { ...p, pH: pH / s, pD: pD / s, pA: pA / s, h2hN: n };
-  }, [same, home, away, homeRisk, awayRisk, neutral, leagueAvg, rho, h2h, clubH2h, liveLeagueCode, scope, club.comp, club.lastComp, club.roster, luM]);
+  }, [same, home, away, homeRisk, awayRisk, neutral, leagueAvg, rho, h2h, clubH2h, cxForm, liveLeagueCode, scope, club.comp, club.lastComp, club.roster, luM]);
   const fair = useMemo(() => fairProbs(o1, ox, o2), [o1, ox, o2]);
   const edges = R && fair ? { e1: R.pH - fair.p1, ex: R.pD - fair.px, e2: R.pA - fair.p2 } : null;
   return (
@@ -2065,16 +2160,24 @@ function MatchTab({ intlMatches = [], matchRequest }) {
         <label className="pf-neutral"><input type="checkbox" checked={neutral} onChange={(e) => setNeutral(e.target.checked)} /><span>Terrain neutre (tournoi)</span></label>
       </section>
       {scope !== "intl" && !same && <NextFixtureBanner league={liveLeagueCode} home={home} away={away} nonce={fixNonce} />}
-      {scope !== "intl" && !same && (
+      {scope !== "intl" && !same && (() => {
+        const cxH = cxForm[home.id], cxA = cxForm[away.id];
+        const formH = cxH && cxH.seq.length ? cxH.seq : home.form;
+        const formA = cxA && cxA.seq.length ? cxA.seq : away.form;
+        const euroTot = (cxH ? cxH.euroN : 0) + (cxA ? cxA.euroN : 0);
+        return (
         <section className="pf-card">
-          <div className="pf-result-head">Forme — 5 derniers matchs (V/N/D)</div>
+          <div className="pf-result-head">Forme — 6 derniers matchs, toutes compétitions (V/N/D)</div>
           <div className="mt-forms">
-            <div className="mt-form"><span className="mt-form-t">{home.f} {short(home.n)}</span><FormPills form={home.form} /></div>
-            <div className="mt-form"><span className="mt-form-t">{away.f} {short(away.n)}</span><FormPills form={away.form} /></div>
+            <div className="mt-form"><span className="mt-form-t">{home.f} {short(home.n)}</span><FormPills form={formH} /></div>
+            <div className="mt-form"><span className="mt-form-t">{away.f} {short(away.n)}</span><FormPills form={formA} /></div>
           </div>
-          {!(home.form && home.form.length) && <div className="lv-meta">Forme récupérée dès que les forces live de la saison sont chargées (proxy /api/stats).</div>}
+          {euroTot > 0
+            ? <div className="lv-meta">🏆 Résultats en Coupe d'Europe (C1/C3) intégrés au pronostic ({euroTot} match{euroTot > 1 ? "s" : ""}), en plus du championnat.</div>
+            : (!(formH && formH.length) && <div className="lv-meta">Forme récupérée dès que les résultats de la saison sont chargés (proxy /api/stats).</div>)}
         </section>
-      )}
+        );
+      })()}
       {scope !== "intl" && !same && (
         <section className="pf-card">
           <div className="pf-result-head"><Users size={15} /> Composition & effectif</div>
@@ -3419,6 +3522,11 @@ function LiveTab() {
     setLoading(true); setNote("");
     setLeagueAvg(LEAGUE_GOALS_AVG[league] || BASE_GOALS);
     let noteText = "";
+    // Dernières données connues : en cas d'échec API (429 quota football-data), on les
+    // CONSERVE plutôt que d'afficher du vide (demande utilisateur). Toute pièce non
+    // rechargée retombe sur le cache précédent.
+    const prevC = await store.get("live:data:" + league);
+    const staleNote = (u) => "⚠️ Limite API atteinte (football-data 10 req/min) — dernières données conservées" + (u ? " (MAJ " + new Date(u).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + ")" : "") + ". Réessaie dans ~1 min.";
     try {
       // pas de paramètre season -> football-data.org renvoie la saison EN COURS
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
@@ -3471,20 +3579,39 @@ function LiveTab() {
       // Calendrier complet (journées) + cotes chargés ICI pour être mis en cache
       // AVEC les forces : une seule salve d'appels par rafraîchissement manuel.
       let upcoming = [], finished = [];
-      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
+      try {
+        const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1");
+        const fd = fr2.ok ? await fr2.json() : {};
+        upcoming = fd.upcoming || []; finished = fd.finished || [];
+        // 429 / calendrier vide : on garde le dernier calendrier connu (pas de vide).
+        if (!upcoming.length && !finished.length && prevC) { upcoming = prevC.upcoming || []; finished = prevC.finished || []; if (!fr2.ok) noteText = noteText || staleNote(prevC.updated); }
+      } catch { if (prevC) { upcoming = prevC.upcoming || []; finished = prevC.finished || []; } }
       // Historique persistant : les journées terminées sont fusionnées avec celles
       // déjà en mémoire (jamais perdues, même si l'API ne les renvoie plus) et
       // réinjectées dans les forces des équipes pour le calcul des probabilités.
       const histAll = mergeHistory(await store.get("live:hist:" + league), finished);
       if (histAll.length) { finished = histAll; await store.set("live:hist:" + league, histAll); }
       let oddsEv = [], oddsN = "";
-      try { const or = await fetch("/api/stats?source=odds&league=" + league); const od = await or.json(); oddsEv = od.events || []; if (!oddsEv.length) oddsN = od.note || ""; } catch { oddsN = "Cotes indisponibles."; }
+      try { const or = await fetch("/api/stats?source=odds&league=" + league); const od = or.ok ? await or.json() : {}; oddsEv = od.events || []; if (!oddsEv.length) oddsN = od.note || ""; } catch { oddsN = "Cotes indisponibles."; }
+      // Cotes vides (429/indispo) : on conserve les dernières cotes connues.
+      if (!oddsEv.length && prevC && prevC.odds && prevC.odds.length) { oddsEv = prevC.odds; oddsN = prevC.oddsNote || oddsN; }
       const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS;
       tm = applyHistoryToTeams(tm, histAll, leagueAvgV);
       setTeams(tm); setXgOn(xgActive); setLeagueAvg(leagueAvgV); setUpdated(new Date()); setA(0); setB(Math.min(1, tm.length - 1));
       setUp(upcoming); setFin(finished); setOdds(oddsEv); setOddsNote(oddsN); if (noteText) setNote(noteText);
       await store.set("live:data:" + league, { teams: tm, leagueAvg: leagueAvgV, xgOn: xgActive, upcoming, finished, odds: oddsEv, oddsNote: oddsN, note: noteText, updated: new Date().toISOString() });
-    } catch (e) { setErr(String(e.message || e)); setTeams([]); }
+    } catch (e) {
+      // Échec (souvent 429 quota) : on RÉ-HYDRATE le dernier cache connu au lieu de
+      // vider l'affichage — l'utilisateur garde les dernières données, avec une note.
+      if (prevC && prevC.teams && prevC.teams.length) {
+        setTeams(prevC.teams); setLeagueAvg(prevC.leagueAvg || LEAGUE_GOALS_AVG[league] || BASE_GOALS);
+        setXgOn(!!prevC.xgOn); setUp(prevC.upcoming || []); setFin(prevC.finished || []);
+        setOdds(prevC.odds || []); setOddsNote(prevC.oddsNote || "");
+        setUpdated(prevC.updated ? new Date(prevC.updated) : new Date());
+        setA(0); setB(Math.min(1, prevC.teams.length - 1));
+        setNote(staleNote(prevC.updated));
+      } else { setErr(String(e.message || e)); setTeams([]); }
+    }
     finally { setLoading(false); }
   };
   // Au changement de ligue : hydrate depuis le cache (aucun appel API). Le premier
@@ -3770,6 +3897,8 @@ function EuropeTab() {
     }
     setLoading(true); setNote("");
     let noteText = "";
+    const prevC = await store.get("europe:data:" + league);
+    const staleNote = (u) => "⚠️ Limite API atteinte (football-data 10 req/min) — dernières données conservées" + (u ? " (MAJ " + new Date(u).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + ")" : "") + ". Réessaie dans ~1 min.";
     try {
       const r = await fetch("/api/stats?source=footballdata&league=" + league);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ("HTTP " + r.status)); }
@@ -3791,11 +3920,24 @@ function EuropeTab() {
       // Même fusion forces de référence + Elo que l'onglet Match / National.
       tm = tm.map((t) => blendWithReference(league, t));
       let upcoming = [], finished = [];
-      try { const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1"); const fd = await fr2.json(); upcoming = fd.upcoming || []; finished = fd.finished || []; } catch { /* calendrier indisponible */ }
+      try {
+        const fr2 = await fetch("/api/stats?source=matches&league=" + league + "&all=1");
+        const fd = fr2.ok ? await fr2.json() : {};
+        upcoming = fd.upcoming || []; finished = fd.finished || [];
+        if (!upcoming.length && !finished.length && prevC) { upcoming = prevC.upcoming || []; finished = prevC.finished || []; if (!fr2.ok) noteText = noteText || staleNote(prevC.updated); }
+      } catch { if (prevC) { upcoming = prevC.upcoming || []; finished = prevC.finished || []; } }
       const leagueAvgV = d.leagueAvg || LEAGUE_GOALS_AVG.CL;
       setTeams(tm); setLeagueAvg(leagueAvgV); setUp(upcoming); setFin(finished); setUpdated(new Date()); if (noteText) setNote(noteText);
       await store.set("europe:data:" + league, { teams: tm, leagueAvg: leagueAvgV, upcoming, finished, note: noteText, updated: new Date().toISOString() });
-    } catch (e) { setErr(String(e.message || e)); setTeams([]); }
+    } catch (e) {
+      // 429/échec : on conserve le dernier cache connu (pas de vide).
+      if (prevC && prevC.teams && prevC.teams.length) {
+        setTeams(prevC.teams); setLeagueAvg(prevC.leagueAvg || LEAGUE_GOALS_AVG.CL);
+        setUp(prevC.upcoming || []); setFin(prevC.finished || []);
+        setUpdated(prevC.updated ? new Date(prevC.updated) : new Date());
+        setNote(staleNote(prevC.updated));
+      } else { setErr(String(e.message || e)); setTeams([]); }
+    }
     finally { setLoading(false); }
   };
   // Rechargement au changement de compétition (on repart sur le classement).
@@ -3957,23 +4099,29 @@ const frTeamNorm = (raw) => {
 function adjustPoolWithIntl(intlMatches, basePool = POOL) {
   const clamp = (x) => Math.max(0.6, Math.min(1.8, x));
   const formMap = {};
+  const seqMap = {}; // nom FR -> [{date, res}] (résultats récents pour la forme W/D/L)
+  const pushSeq = (fr, gf, ga, date) => { if (!fr) return; (seqMap[fr] = seqMap[fr] || []).push({ date, res: gf > ga ? "W" : gf < ga ? "L" : "D" }); };
   for (const m of intlMatches) {
     if (m.hg == null || m.ag == null) continue;
     const hFr = EN_TO_FR_NORM[normName(m.home)], aFr = EN_TO_FR_NORM[normName(m.away)];
     if (hFr) { if (!formMap[hFr]) formMap[hFr] = { gf: 0, ga: 0, gp: 0 }; formMap[hFr].gf += m.hg; formMap[hFr].ga += m.ag; formMap[hFr].gp++; }
     if (aFr) { if (!formMap[aFr]) formMap[aFr] = { gf: 0, ga: 0, gp: 0 }; formMap[aFr].gf += m.ag; formMap[aFr].ga += m.hg; formMap[aFr].gp++; }
+    pushSeq(hFr, m.hg, m.ag, m.date); pushSeq(aFr, m.ag, m.hg, m.date);
   }
+  // Forme W/D/L des 5 derniers matchs (chronologique) -> momentum, comme les clubs.
+  const seqFor = (n) => (seqMap[n] || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date)).map((x) => x.res).slice(-5);
   return basePool.map((t) => {
     const rank = FIFA_RANK[t.n] || 70;
     // Elo ajusté : 60% elo actuel + 40% elo dérivé du rang FIFA (rang 1→2100, rang 100→1400)
     const rankElo = Math.round(2100 - 7 * (rank - 1));
     const elo = Math.round(0.6 * t.elo + 0.4 * rankElo);
+    const seq = seqFor(t.n);
     const form = formMap[t.n];
-    if (!form || form.gp < 3) return { ...t, elo };
+    if (!form || form.gp < 3) return { ...t, elo, form: seq.length ? seq : (t.form || []) };
     const w = Math.min(0.28, 0.055 * form.gp);
     const attObs = clamp((form.gf / form.gp) / WC_AVG);
     const defObs = clamp((form.ga / form.gp) / WC_AVG);
-    return { ...t, elo, att: clamp(Math.pow(t.att, 1 - w) * Math.pow(attObs, w)), def: clamp(Math.pow(t.def, 1 - w) * Math.pow(defObs, w)) };
+    return { ...t, elo, form: seq.length ? seq : (t.form || []), att: clamp(Math.pow(t.att, 1 - w) * Math.pow(attObs, w)), def: clamp(Math.pow(t.def, 1 - w) * Math.pow(defObs, w)) };
   });
 }
 

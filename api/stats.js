@@ -519,17 +519,48 @@ export default async function handler(req, res) {
         ["EC24", "https://api.football-data.org/v4/competitions/EC/matches?status=FINISHED&season=2024"],
         ["EC20", "https://api.football-data.org/v4/competitions/EC/matches?status=FINISHED&season=2020"],
       ];
+      // SÉQUENTIEL (pas Promise.all) : 4 requêtes simultanées déclenchaient un 429 en
+      // rafale sur le tier gratuit (10 req/min mais burst limité) -> `count: 0` alors
+      // que les données existent. En série, la saison en cours (WC 2026, EC 2024) passe ;
+      // les saisons passées (season=2022/2020) peuvent être bloquées (403) -> ignorées.
       const all = [];
-      await Promise.all(endpoints.map(async ([comp, url]) => {
+      for (const [comp, url] of endpoints) {
         try {
           const r = await fetch(url, { headers: H });
-          if (!r.ok) return;
+          if (!r.ok) continue;
           const d = await r.json();
           for (const m of (d.matches || [])) { const mm = mapM(m, comp); if (mm) all.push(mm); }
         } catch {}
-      }));
+      }
       all.sort((a, b) => new Date(b.date) - new Date(a.date));
+      if (!all.length) shortCache();
       return res.status(200).json({ source: "intl", count: all.length, matches: all });
+    }
+
+    /* ---- RÉSULTATS RÉCENTS D'UN CLUB (toutes compétitions) ----
+     * /teams/{id}/matches renvoie, sur le tier gratuit, les matchs de la SAISON EN
+     * COURS de l'équipe TOUTES compétitions confondues (championnat + Coupe d'Europe
+     * C1/C3 + coupes nationales). Sert à l'onglet Match : la forme récente et les
+     * résultats européens (absents du classement du championnat) entrent dans le calcul. */
+    if (source === "teammatches") {
+      const team = req.query.team;
+      if (!team) return res.status(400).json({ error: "paramètre 'team' requis" });
+      const limit = Math.min(40, Math.max(1, parseInt(req.query.limit, 10) || 14));
+      const r = await fetch("https://api.football-data.org/v4/teams/" + team + "/matches?status=FINISHED&limit=" + limit, { headers: H });
+      if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
+      const j = await r.json();
+      const matches = (j.matches || []).map((m) => ({
+        date: m.utcDate,
+        comp: (m.competition && m.competition.code) || null,
+        compName: (m.competition && m.competition.name) || null,
+        homeId: m.homeTeam.id, awayId: m.awayTeam.id,
+        home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
+        hg: m.score && m.score.fullTime ? m.score.fullTime.home : null,
+        ag: m.score && m.score.fullTime ? m.score.fullTime.away : null,
+      })).filter((m) => m.hg != null && m.ag != null)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      if (!matches.length) shortCache();
+      return res.status(200).json({ source, team, count: matches.length, updated: new Date().toISOString(), matches });
     }
 
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
