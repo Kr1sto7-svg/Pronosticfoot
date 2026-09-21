@@ -466,21 +466,37 @@ export default async function handler(req, res) {
       const j = await r.json();
       const all = j.matches || [];
       if (!all.length) shortCache();
-      const map = (m) => ({
-        id: m.id, date: m.utcDate, status: m.status, matchday: m.matchday,
-        // stage = tour (GROUP_STAGE, LAST_32, LAST_16, QUARTER_FINALS, SEMI_FINALS, FINAL…)
-        // winner = vainqueur officiel (gère prolongation + tirs au but) : HOME_TEAM / AWAY_TEAM / DRAW.
-        stage: m.stage, winner: m.score ? m.score.winner : null,
-        homeId: m.homeTeam.id, awayId: m.awayTeam.id,
-        home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
-        homeGoals: m.score && m.score.fullTime ? m.score.fullTime.home : null,
-        awayGoals: m.score && m.score.fullTime ? m.score.fullTime.away : null,
-        // Cotes UNIQUEMENT si l'API les fournit (sinon null : non incluses dans le tier gratuit).
-        odds: m.odds && typeof m.odds.homeWin === "number" ? { h: m.odds.homeWin, d: m.odds.draw, a: m.odds.awayWin } : null,
-      });
+      // Un match « terminé » = FINISHED (temps réglementaire/prolong.) ou AWARDED (résultat
+      // sur tapis vert) : ces deux seuls statuts ont un score DÉFINITIF. Tous les autres
+      // (SCHEDULED, TIMED, IN_PLAY, PAUSED, SUSPENDED, POSTPONED, CANCELLED) sont « à venir /
+      // en cours » et NE DOIVENT JAMAIS être perdus (sinon les matchs d'une journée déjà
+      // entamée — ex. les affiches du dimanche soir en cours — disparaissent de la vue).
+      const isDone = (m) => m.status === "FINISHED" || m.status === "AWARDED";
+      const map = (m) => {
+        const done = isDone(m);
+        const live = m.status === "IN_PLAY" || m.status === "PAUSED";
+        return {
+          id: m.id, date: m.utcDate, status: m.status, matchday: m.matchday, live,
+          // stage = tour (GROUP_STAGE, LAST_32, LAST_16, QUARTER_FINALS, SEMI_FINALS, FINAL…)
+          // winner = vainqueur officiel (gère prolongation + tirs au but) : HOME_TEAM / AWAY_TEAM / DRAW.
+          stage: m.stage, winner: done && m.score ? m.score.winner : null,
+          homeId: m.homeTeam.id, awayId: m.awayTeam.id,
+          home: m.homeTeam.shortName || m.homeTeam.name, away: m.awayTeam.shortName || m.awayTeam.name,
+          // Buts EXPOSÉS seulement si le match est terminé : pendant un IN_PLAY, football-data
+          // renvoie déjà le score courant dans fullTime → sans ce garde-fou, un match en cours
+          // s'afficherait comme « Score final » et sortirait du pronostic. Score live -> liveScore.
+          homeGoals: done && m.score && m.score.fullTime ? m.score.fullTime.home : null,
+          awayGoals: done && m.score && m.score.fullTime ? m.score.fullTime.away : null,
+          liveScore: live && m.score && m.score.fullTime && m.score.fullTime.home != null
+            ? { home: m.score.fullTime.home, away: m.score.fullTime.away } : null,
+          // Cotes UNIQUEMENT si l'API les fournit (sinon null : non incluses dans le tier gratuit).
+          odds: m.odds && typeof m.odds.homeWin === "number" ? { h: m.odds.homeWin, d: m.odds.draw, a: m.odds.awayWin } : null,
+        };
+      };
       const noLimit = req.query.all === "1";
-      const finished = all.filter((m) => m.status === "FINISHED").sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
-      const upcoming = all.filter((m) => ["TIMED", "SCHEDULED"].includes(m.status)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+      const finished = all.filter(isDone).sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
+      // Complément strict de `finished` : garantit qu'AUCUN match n'est omis des deux listes.
+      const upcoming = all.filter((m) => !isDone(m)).sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
       return res.status(200).json({ source, league, updated: new Date().toISOString(), finished: (noLimit ? finished : finished.slice(0, 12)).map(map), upcoming: (noLimit ? upcoming : upcoming.slice(0, 12)).map(map) });
     }
 

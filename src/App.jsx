@@ -3230,11 +3230,14 @@ function NationalMatchCard({ m, league, teamById, leagueAvg, rho, predictPlayed 
   // partiellement disputées (sinon les matchs joués disparaissent de la journée).
   const played = m.homeGoals != null && m.awayGoals != null;
   const winH = played && m.winner === "HOME_TEAM", winA = played && m.winner === "AWAY_TEAM";
+  // Match en cours (IN_PLAY/PAUSED) : pas encore « joué » (pronostic conservé) mais score live dispo.
+  const live = !played && m.live && m.liveScore;
   return (
     <div className={"wc-m" + (lyon ? " nat-lyon" : "")}>
       <div className="wc-mmeta">
         <span className="wc-mdate">{formatFrDate(m.date)}</span>
         {played && <span className="wc-mdone">Terminé</span>}
+        {live && <span className="wc-mlive">🔴 En direct {m.liveScore.home}–{m.liveScore.away}</span>}
         {lyon && <span className="nat-fav">⭐ Lyon</span>}
       </div>
       <div className="wc-mline">
@@ -4377,6 +4380,7 @@ const CSS = `
 .wc-mmeta{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
 .wc-mdate{font-family:'JetBrains Mono';font-size:10px;color:var(--dim);}
 .wc-mdone{font-size:9.5px;font-weight:800;letter-spacing:.03em;background:rgba(120,130,140,.18);color:var(--dim);border-radius:5px;padding:1px 6px;text-transform:uppercase;}
+.wc-mlive{font-size:9.5px;font-weight:800;letter-spacing:.03em;background:rgba(225,50,60,.16);color:#e23a44;border-radius:5px;padding:1px 6px;}
 .wc-mchan{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1b1f25;color:var(--dim);}
 .wc-mchan-tf1{background:rgba(70,211,255,.15);color:var(--cyan);}
 .wc-pred{display:flex;gap:5px;margin-top:6px;}
