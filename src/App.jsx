@@ -892,17 +892,16 @@ const GROUPS_2026 = [
 
 /* ---------- UEFA Ligue des Nations (onglet dédié) ----------
  * Format : Ligue A = 4 groupes de 4, double confrontation (aller/retour) sur 6
- * journées ; les 4 vainqueurs de groupe se qualifient pour le « Final Four ».
- * Composition PRÉ-REMPLIE sur l'édition 2024-25 (dernière connue avec certitude)
- * et ÉDITABLE via les menus — on pourra y intégrer plus tard les nations réelles
- * du prochain tirage et le tableau du Final Four. Les 4 groupes utilisent des noms
- * présents dans POOL/EXTRA_NATIONS pour hériter des forces (Elo + rang FIFA). */
+ * journées ; les 2 premiers de chaque groupe vont en quarts de finale, puis « Final Four ».
+ * Composition PRÉ-REMPLIE sur l'édition 2026-27 (tirage UEFA du 12/02/2026, Bruxelles)
+ * et ÉDITABLE via les menus — les 4 groupes utilisent des noms présents dans
+ * POOL/EXTRA_NATIONS pour hériter des forces (Elo + rang FIFA). */
 const NL_GROUP_LABELS = ["A1", "A2", "A3", "A4"];
 const NL_DEFAULT_GROUPS = [
-  ["Croatie", "Portugal", "Pologne", "Écosse"],
-  ["Italie", "Belgique", "France", "Israël"],
-  ["Pays-Bas", "Hongrie", "Allemagne", "Bosnie-Herzégovine"],
-  ["Espagne", "Danemark", "Suisse", "Serbie"],
+  ["France", "Italie", "Belgique", "Turquie"],
+  ["Allemagne", "Pays-Bas", "Serbie", "Grèce"],
+  ["Espagne", "Croatie", "Angleterre", "Tchéquie"],
+  ["Portugal", "Danemark", "Norvège", "Pays de Galles"],
 ];
 /* Calendrier générique d'un groupe de 4 en double round-robin (6 journées).
  * Chaque entrée = { x, y } positions dans le groupe (x = domicile). L'orientation
@@ -915,11 +914,12 @@ const NL_ROUNDS = [
   [{ x: 2, y: 0 }, { x: 1, y: 3 }], // J5
   [{ x: 0, y: 3 }, { x: 2, y: 1 }], // J6
 ];
-/* Fenêtres officielles des journées de la Ligue des Nations 2024-25 (heure de
- * coup d'envoi indicative, 20h45 CET). L'onglet affiche la date en heure française. */
+/* Fenêtres officielles des journées de la Ligue des Nations 2026-27 (double journée
+ * par fenêtre : sept 24-29, oct 1-6, nov 12-17 ; coup d'envoi indicatif 20h45 heure
+ * locale). L'onglet affiche la date en heure française. */
 const NL_ROUND_DATES = [
-  "2024-09-06T18:45:00Z", "2024-09-09T18:45:00Z", "2024-10-11T18:45:00Z",
-  "2024-10-14T18:45:00Z", "2024-11-16T18:45:00Z", "2024-11-19T18:45:00Z",
+  "2026-09-24T18:45:00Z", "2026-09-27T18:45:00Z", "2026-10-01T18:45:00Z",
+  "2026-10-04T18:45:00Z", "2026-11-12T19:45:00Z", "2026-11-15T19:45:00Z",
 ];
 const NL_AVG = WC_AVG; // matchs de sélections : même moyenne de buts que le Mondial
 
@@ -3134,7 +3134,7 @@ function NLFinals({ groups, results, poolByName }) {
   return (
     <div className="pf-card wc-group">
       <div className="wc-group-body">
-        <div className="wc-hint">Vainqueurs de groupe qualifiés (réels si scores saisis, sinon projetés à l'Elo). Appariement des demies indicatif — <b>le tirage et la saisie du Final Four pourront être intégrés plus tard</b>.</div>
+        <div className="wc-hint">Projection <b>simplifiée</b> : les 4 vainqueurs de groupe (réels si scores saisis, sinon projetés à l'Elo) appariés directement en demies. En réalité les 2 premiers de chaque groupe passent d'abord par des <b>quarts de finale</b> — <b>le tableau complet (quarts + saisie) pourra être intégré plus tard</b>.</div>
         <div className="wc-matches">
           <Line hn={sf[0][0]} an={sf[0][1]} tag="Demi-finale 1" />
           <Line hn={sf[1][0]} an={sf[1][1]} tag="Demi-finale 2" />
@@ -3180,7 +3180,7 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
         <button className="wc-reset" onClick={reset} title="Réinitialiser"><RotateCcw size={15} /></button>
       </div>
       {view === "groups" ? (<>
-        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>). <b>Groupes éditables</b> — ajuste-les au tirage. Les vainqueurs de groupe alimentent le Final Four.</div>
+        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>). <b>Groupes éditables</b> — ajuste-les au tirage. Les <b>2 premiers</b> de chaque groupe filent en <b>quarts de finale</b> (puis Final Four) ; le 3e joue les barrages, le dernier est relégué en Ligue B.</div>
         {groups.map((g, gi) => <NLGroupCard key={gi} gi={gi} label={NL_GROUP_LABELS[gi]} group={g} results={results} pool={pool} poolByName={poolByName} comp={comp} lastComp={lastComp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} onLoadRoster={onLoadRoster} onTeam={onTeam} onValidate={onValidate} onClear={onClear} intlMatches={intlMatches} leagueAvg={leagueAvg} rho={rho} onOpenMatch={onOpenMatch} defOpen={gi === 0} />)}
       </>) : (
         <NLFinals groups={groups} results={results} poolByName={poolByName} />
