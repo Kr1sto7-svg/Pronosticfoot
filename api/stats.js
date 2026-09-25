@@ -274,6 +274,41 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---- RÉSULTATS LIGUE DES NATIONS via API-Football (?source=nlresults) ----
+   * La NL n'est PAS couverte par football-data en gratuit. API-Football l'expose
+   * (league id 5, toutes divisions A/B/C/D confondues) MAIS le tier gratuit bloque
+   * souvent la saison EN COURS -> on renvoie alors supported:false (+ note) pour un
+   * repli propre en saisie manuelle côté app. Ne renvoie QUE les matchs terminés. */
+  if (source === "nlresults") {
+    const key = process.env.APIFOOTBALL_KEY || process.env.API_KEY;
+    if (!key) return res.status(200).json({ source, supported: false, matches: [], note: "APIFOOTBALL_KEY (ou API_KEY) non configurée — Ligue des Nations en saisie manuelle." });
+    // Saison = année de début de l'édition (2026-27 -> 2026) : bascule en août.
+    const now = new Date();
+    const season = req.query.season || String(now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1);
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=1800");
+    const AH = { "x-apisports-key": key };
+    const DONE = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
+    const apiErr = (j) => { const e = j && j.errors; if (!e) return null; if (Array.isArray(e)) return e.length ? e.join(" · ") : null; const v = Object.values(e).filter(Boolean); return v.length ? v.join(" · ") : null; };
+    try {
+      const r = await fetch("https://v3.football.api-sports.io/fixtures?league=5&season=" + season, { headers: AH });
+      const j = await r.json();
+      const err = apiErr(j);
+      if (err) return res.status(200).json({ source, supported: false, season, matches: [], note: "API-Football : " + err + " (repli saisie manuelle)." });
+      if (!j.response || !j.response.length) return res.status(200).json({ source, supported: true, season, count: 0, matches: [], note: "Aucun match renvoyé (league=5, season=" + season + ") — plan ne couvrant pas la saison en cours ?" });
+      const matches = j.response
+        .filter((x) => DONE.has(x.fixture && x.fixture.status && x.fixture.status.short) && x.goals && x.goals.home != null && x.goals.away != null)
+        .map((x) => ({
+          date: x.fixture.date,
+          round: (x.league && x.league.round) || "",
+          home: x.teams.home.name, away: x.teams.away.name,
+          hg: x.goals.home, ag: x.goals.away,
+        }));
+      return res.status(200).json({ source, supported: true, season, count: matches.length, updated: new Date().toISOString(), matches });
+    } catch (e) {
+      return res.status(200).json({ source, supported: false, matches: [], note: "API-Football injoignable : " + String(e.message || e) });
+    }
+  }
+
   if (!token) return res.status(500).json({ error: "FOOTBALLDATA_TOKEN non configurée sur Vercel" });
 
   try {

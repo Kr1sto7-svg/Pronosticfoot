@@ -3201,6 +3201,8 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
   const [view, setView] = useState("groups");
   const [groups, setGroups] = useState(NL_DEFAULT_GROUPS);
   const [results, setResults] = useState({});
+  const [auto, setAuto] = useState({});        // scores auto (API-Football) au format results
+  const [autoInfo, setAutoInfo] = useState(null); // { supported, note, count }
   const [comp, setComp] = useState({});
   const [lastComp, setLastComp] = useState({});
   const [roster, setRoster] = useState({});
@@ -3213,19 +3215,41 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
   useEffect(() => { if (loaded) store.set("nl:results:v1", results); }, [results, loaded]);
   useEffect(() => { if (loaded) store.set("nl:comp:v1", comp); }, [comp, loaded]);
   useEffect(() => { if (loaded) store.set("nl:lastcomp:v1", lastComp); }, [lastComp, loaded]);
-  // Les scores NL saisis (aucune source live gratuite ne couvre la Ligue des Nations)
-  // sont réinjectés dans le moteur au même titre que les résultats Mondial/Euro : mappés
-  // en noms anglais (adjustPoolWithIntl re-mappe EN->FR), ils alimentent forces, forme
-  // récente et confrontations directes. Ainsi les probas des journées suivantes évoluent
-  // à mesure qu'on remplit le calendrier.
+  // Auto-fetch des scores NL via API-Football (league 5). N'aboutit QUE si le plan
+  // couvre la saison en cours ; sinon supported:false -> repli en saisie manuelle.
+  // Les scores récupérés sont rattachés aux affiches par NOM (frTeamNorm : EN->FR).
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/stats?source=nlresults").then((r) => r.json()).then((d) => {
+      if (!alive) return;
+      setAutoInfo({ supported: !!d.supported, note: d.note || "", count: d.count || 0 });
+      const map = {};
+      if (d.supported && Array.isArray(d.matches)) {
+        for (const m of d.matches) {
+          const hFr = frTeamNorm(m.home), aFr = frTeamNorm(m.away);
+          if (!hFr || !aFr) continue;
+          const f = NL_2026_FIXTURES.find((x) => x.h === hFr && x.a === aFr);
+          if (f) map[nlMid(f.g, f.h, f.a)] = { hg: m.hg, ag: m.ag, ok: 1, auto: 1 };
+        }
+      }
+      setAuto(map);
+    }).catch(() => { if (alive) setAutoInfo({ supported: false, note: "API injoignable" }); });
+    return () => { alive = false; };
+  }, []);
+  // Résultats effectifs : auto (API) complétés/écrasés par la saisie manuelle (prioritaire).
+  const effResults = useMemo(() => ({ ...auto, ...results }), [auto, results]);
+  // Les scores NL (auto + manuels) sont réinjectés dans le moteur au même titre que les
+  // résultats Mondial/Euro : mappés en noms anglais (adjustPoolWithIntl re-mappe EN->FR),
+  // ils alimentent forces, forme récente et confrontations directes. Ainsi les probas des
+  // journées suivantes évoluent à mesure que le calendrier se remplit.
   const nlResultMatches = useMemo(() => {
     const arr = [];
     groups.forEach((g, gi) => nlFixtures(gi, g).forEach((f) => {
-      const r = results[f.id];
+      const r = effResults[f.id];
       if (r && r.hg != null && r.ag != null) arr.push({ date: f.d, comp: "UNL", home: NAT_EN[f.h] || f.h, away: NAT_EN[f.a] || f.a, hg: r.hg, ag: r.ag });
     }));
     return arr;
-  }, [groups, results]);
+  }, [groups, effResults]);
   const allIntl = useMemo(() => [...nlResultMatches, ...intlMatches], [nlResultMatches, intlMatches]);
   const pool = useMemo(() => intlPool(allIntl), [allIntl]);
   const poolByName = useMemo(() => { const o = {}; pool.forEach((t) => { o[t.n] = t; }); return o; }, [pool]);
@@ -3247,10 +3271,13 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
         <button className="wc-reset" onClick={reset} title="Réinitialiser"><RotateCcw size={15} /></button>
       </div>
       {view === "groups" ? (<>
-        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>) ; les scores saisis alimentent forme et forces, donc les probas des journées suivantes évoluent. Calendrier officiel du <b>tirage UEFA 2026-27</b> (groupes éditables). Les <b>2 premiers</b> de chaque groupe filent en <b>quarts de finale</b> (puis Final Four) ; le 3e joue les barrages, le dernier est relégué en Ligue B.</div>
-        {groups.map((g, gi) => <NLGroupCard key={gi} gi={gi} label={NL_GROUP_LABELS[gi]} group={g} results={results} pool={pool} poolByName={poolByName} comp={comp} lastComp={lastComp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} onLoadRoster={onLoadRoster} onTeam={onTeam} onValidate={onValidate} onClear={onClear} intlMatches={allIntl} leagueAvg={leagueAvg} rho={rho} onOpenMatch={onOpenMatch} defOpen={gi === 0} />)}
+        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>) ; les scores alimentent forme et forces, donc les probas des journées suivantes évoluent. Calendrier officiel du <b>tirage UEFA 2026-27</b> (groupes éditables). Les <b>2 premiers</b> de chaque groupe filent en <b>quarts de finale</b> (puis Final Four) ; le 3e joue les barrages, le dernier est relégué en Ligue B.</div>
+        {autoInfo && (autoInfo.supported && autoInfo.count > 0
+          ? <div className="wc-hint nl-auto-ok">🔄 <b>{autoInfo.count} score{autoInfo.count > 1 ? "s" : ""}</b> récupéré{autoInfo.count > 1 ? "s" : ""} automatiquement (API-Football). Corrige un score avec le crayon si besoin — ta correction reste prioritaire.</div>
+          : <div className="wc-hint nl-auto-ko">✍️ <b>Saisie manuelle</b> — pas de récupération automatique disponible{autoInfo.note ? " (" + autoInfo.note + ")" : ""}. Entre les scores puis valide avec ✓.</div>)}
+        {groups.map((g, gi) => <NLGroupCard key={gi} gi={gi} label={NL_GROUP_LABELS[gi]} group={g} results={effResults} pool={pool} poolByName={poolByName} comp={comp} lastComp={lastComp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} onLoadRoster={onLoadRoster} onTeam={onTeam} onValidate={onValidate} onClear={onClear} intlMatches={allIntl} leagueAvg={leagueAvg} rho={rho} onOpenMatch={onOpenMatch} defOpen={gi === 0} />)}
       </>) : (
-        <NLFinals groups={groups} results={results} poolByName={poolByName} />
+        <NLFinals groups={groups} results={effResults} poolByName={poolByName} />
       )}
     </>
   );
@@ -4567,6 +4594,8 @@ const CSS = `
 .wc-qb{font-family:'Saira Condensed';font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;margin-left:3px;}
 .wc-qb3{background:var(--amber);}
 .wc-qbr{background:#e06666;color:#0b0d10;}
+.nl-auto-ok{border-left:3px solid var(--lime);}
+.nl-auto-ko{border-left:3px solid var(--amber);}
 .wc-edit{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;}
 .wc-editrow{display:flex;align-items:center;gap:5px;background:#0e1116;border:1px solid var(--line);border-radius:9px;padding:4px 7px;}
 .wc-editrow select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:var(--txt);font-size:12px;width:100%;outline:none;}
