@@ -903,24 +903,76 @@ const NL_DEFAULT_GROUPS = [
   ["Espagne", "Croatie", "Angleterre", "Tchéquie"],
   ["Portugal", "Danemark", "Norvège", "Pays de Galles"],
 ];
-/* Calendrier générique d'un groupe de 4 en double round-robin (6 journées).
- * Chaque entrée = { x, y } positions dans le groupe (x = domicile). L'orientation
- * s'inverse au retour (J4-J6), comme dans la vraie Ligue des Nations. */
-const NL_ROUNDS = [
-  [{ x: 0, y: 1 }, { x: 2, y: 3 }], // J1
-  [{ x: 0, y: 2 }, { x: 3, y: 1 }], // J2
-  [{ x: 3, y: 0 }, { x: 1, y: 2 }], // J3
-  [{ x: 1, y: 0 }, { x: 3, y: 2 }], // J4
-  [{ x: 2, y: 0 }, { x: 1, y: 3 }], // J5
-  [{ x: 0, y: 3 }, { x: 2, y: 1 }], // J6
+/* Calendrier RÉEL de la phase de ligue 2026-27 (tirage UEFA du 12/02/2026, Bruxelles).
+ * { g, md, h, a, d } : g = index de groupe (0..3, ordre de NL_DEFAULT_GROUPS),
+ * md = journée, h/a = domicile/extérieur (noms FR de POOL/EXTRA_NATIONS), d = coup
+ * d'envoi indicatif (20h45 heure locale ; affiché en heure française). Les affiches
+ * sont déterministes ; les SCORES restent à saisir à la main (aucune source live
+ * gratuite ne couvre la Ligue des Nations). Les fixtures sont appariées par NOM :
+ * si un groupe est édité, seules les affiches dont les 2 équipes sont encore dans
+ * le groupe s'affichent (dégradation propre). */
+const NL_2026_FIXTURES = [
+  // Groupe A1 — France, Italie, Belgique, Turquie
+  { g: 0, md: 1, h: "Italie", a: "Belgique", d: "2026-09-25T18:45:00Z" },
+  { g: 0, md: 1, h: "Turquie", a: "France", d: "2026-09-25T18:45:00Z" },
+  { g: 0, md: 2, h: "Belgique", a: "France", d: "2026-09-28T18:45:00Z" },
+  { g: 0, md: 2, h: "Turquie", a: "Italie", d: "2026-09-28T18:45:00Z" },
+  { g: 0, md: 3, h: "Belgique", a: "Turquie", d: "2026-10-02T18:45:00Z" },
+  { g: 0, md: 3, h: "France", a: "Italie", d: "2026-10-02T18:45:00Z" },
+  { g: 0, md: 4, h: "France", a: "Belgique", d: "2026-10-05T18:45:00Z" },
+  { g: 0, md: 4, h: "Italie", a: "Turquie", d: "2026-10-05T18:45:00Z" },
+  { g: 0, md: 5, h: "Turquie", a: "Belgique", d: "2026-11-12T19:45:00Z" },
+  { g: 0, md: 5, h: "Italie", a: "France", d: "2026-11-12T19:45:00Z" },
+  { g: 0, md: 6, h: "Belgique", a: "Italie", d: "2026-11-15T19:45:00Z" },
+  { g: 0, md: 6, h: "France", a: "Turquie", d: "2026-11-15T19:45:00Z" },
+  // Groupe A2 — Allemagne, Pays-Bas, Serbie, Grèce
+  { g: 1, md: 1, h: "Pays-Bas", a: "Allemagne", d: "2026-09-24T18:45:00Z" },
+  { g: 1, md: 1, h: "Serbie", a: "Grèce", d: "2026-09-24T18:45:00Z" },
+  { g: 1, md: 2, h: "Serbie", a: "Pays-Bas", d: "2026-09-27T18:45:00Z" },
+  { g: 1, md: 2, h: "Allemagne", a: "Grèce", d: "2026-09-27T18:45:00Z" },
+  { g: 1, md: 3, h: "Allemagne", a: "Serbie", d: "2026-10-01T18:45:00Z" },
+  { g: 1, md: 3, h: "Grèce", a: "Pays-Bas", d: "2026-10-01T18:45:00Z" },
+  { g: 1, md: 4, h: "Grèce", a: "Allemagne", d: "2026-10-04T18:45:00Z" },
+  { g: 1, md: 4, h: "Pays-Bas", a: "Serbie", d: "2026-10-04T18:45:00Z" },
+  { g: 1, md: 5, h: "Pays-Bas", a: "Grèce", d: "2026-11-13T19:45:00Z" },
+  { g: 1, md: 5, h: "Serbie", a: "Allemagne", d: "2026-11-13T19:45:00Z" },
+  { g: 1, md: 6, h: "Allemagne", a: "Pays-Bas", d: "2026-11-16T19:45:00Z" },
+  { g: 1, md: 6, h: "Grèce", a: "Serbie", d: "2026-11-16T19:45:00Z" },
+  // Groupe A3 — Espagne, Croatie, Angleterre, Tchéquie
+  { g: 2, md: 1, h: "Tchéquie", a: "Croatie", d: "2026-09-26T18:45:00Z" },
+  { g: 2, md: 1, h: "Angleterre", a: "Espagne", d: "2026-09-26T18:45:00Z" },
+  { g: 2, md: 2, h: "Tchéquie", a: "Angleterre", d: "2026-09-29T18:45:00Z" },
+  { g: 2, md: 2, h: "Espagne", a: "Croatie", d: "2026-09-29T18:45:00Z" },
+  { g: 2, md: 3, h: "Croatie", a: "Angleterre", d: "2026-10-03T18:45:00Z" },
+  { g: 2, md: 3, h: "Espagne", a: "Tchéquie", d: "2026-10-03T18:45:00Z" },
+  { g: 2, md: 4, h: "Croatie", a: "Espagne", d: "2026-10-06T18:45:00Z" },
+  { g: 2, md: 4, h: "Angleterre", a: "Tchéquie", d: "2026-10-06T18:45:00Z" },
+  { g: 2, md: 5, h: "Tchéquie", a: "Espagne", d: "2026-11-12T19:45:00Z" },
+  { g: 2, md: 5, h: "Angleterre", a: "Croatie", d: "2026-11-12T19:45:00Z" },
+  { g: 2, md: 6, h: "Croatie", a: "Tchéquie", d: "2026-11-15T19:45:00Z" },
+  { g: 2, md: 6, h: "Espagne", a: "Angleterre", d: "2026-11-15T19:45:00Z" },
+  // Groupe A4 — Portugal, Danemark, Norvège, Pays de Galles
+  { g: 3, md: 1, h: "Norvège", a: "Danemark", d: "2026-09-24T18:45:00Z" },
+  { g: 3, md: 1, h: "Portugal", a: "Pays de Galles", d: "2026-09-24T18:45:00Z" },
+  { g: 3, md: 2, h: "Danemark", a: "Pays de Galles", d: "2026-09-27T18:45:00Z" },
+  { g: 3, md: 2, h: "Norvège", a: "Portugal", d: "2026-09-27T18:45:00Z" },
+  { g: 3, md: 3, h: "Danemark", a: "Portugal", d: "2026-10-01T18:45:00Z" },
+  { g: 3, md: 3, h: "Pays de Galles", a: "Norvège", d: "2026-10-01T18:45:00Z" },
+  { g: 3, md: 4, h: "Portugal", a: "Norvège", d: "2026-10-04T18:45:00Z" },
+  { g: 3, md: 4, h: "Pays de Galles", a: "Danemark", d: "2026-10-04T18:45:00Z" },
+  { g: 3, md: 5, h: "Norvège", a: "Pays de Galles", d: "2026-11-14T19:45:00Z" },
+  { g: 3, md: 5, h: "Portugal", a: "Danemark", d: "2026-11-14T19:45:00Z" },
+  { g: 3, md: 6, h: "Danemark", a: "Norvège", d: "2026-11-17T19:45:00Z" },
+  { g: 3, md: 6, h: "Pays de Galles", a: "Portugal", d: "2026-11-17T19:45:00Z" },
 ];
-/* Fenêtres officielles des journées de la Ligue des Nations 2026-27 (double journée
- * par fenêtre : sept 24-29, oct 1-6, nov 12-17 ; coup d'envoi indicatif 20h45 heure
- * locale). L'onglet affiche la date en heure française. */
-const NL_ROUND_DATES = [
-  "2026-09-24T18:45:00Z", "2026-09-27T18:45:00Z", "2026-10-01T18:45:00Z",
-  "2026-10-04T18:45:00Z", "2026-11-12T19:45:00Z", "2026-11-15T19:45:00Z",
-];
+/* Affiches réelles d'un groupe (id stable par nom), filtrées sur la composition
+ * courante du groupe pour rester robustes à une édition manuelle. Ordre = journées. */
+const nlMid = (gi, h, a) => "NL" + gi + "|" + h + "|" + a;
+function nlFixtures(gi, group) {
+  return NL_2026_FIXTURES
+    .filter((f) => f.g === gi && group.includes(f.h) && group.includes(f.a))
+    .map((f) => ({ ...f, id: nlMid(gi, f.h, f.a) }));
+}
 const NL_AVG = WC_AVG; // matchs de sélections : même moyenne de buts que le Mondial
 
 /* ---------- maths ---------- */
@@ -3019,19 +3071,19 @@ function WorldCupTab({ intlMatches = [], onOpenMatch }) {
  * confrontations précédentes + compo). Décor : Ligue A (4 groupes de 4). Le
  * « Final Four » (phase finale des 4 vainqueurs) est branché en projection et
  * pourra être enrichi plus tard (saisie de scores, tableau). */
-const nlId = (gi, r, x, y) => "NL" + gi + "-" + r + "-" + x + "-" + y;
 function nlStandings(group, results, gi, poolByName) {
   const rows = group.map((name) => ({ name, pts: 0, gf: 0, ga: 0, gp: 0, seq: [] }));
-  NL_ROUNDS.forEach((round, r) => round.forEach(({ x, y }) => {
-    const res = results[nlId(gi, r, x, y)];
+  const idx = {}; group.forEach((n, i) => { idx[n] = i; });
+  nlFixtures(gi, group).forEach((f) => {
+    const res = results[f.id];
     if (res && res.hg != null && res.ag != null) {
-      const X = rows[x], Y = rows[y];
+      const X = rows[idx[f.h]], Y = rows[idx[f.a]];
       X.gf += res.hg; X.ga += res.ag; X.gp++; Y.gf += res.ag; Y.ga += res.hg; Y.gp++;
       if (res.hg > res.ag) { X.pts += 3; X.seq.push("W"); Y.seq.push("L"); }
       else if (res.hg < res.ag) { Y.pts += 3; Y.seq.push("W"); X.seq.push("L"); }
       else { X.pts++; Y.pts++; X.seq.push("D"); Y.seq.push("D"); }
     }
-  }));
+  });
   rows.forEach((row) => (row.gd = row.gf - row.ga));
   const elo = (n) => { const t = poolByName[n]; return t ? t.elo : 1500; };
   return rows.map((row) => ({ ...row })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || elo(b.name) - elo(a.name));
@@ -3052,7 +3104,8 @@ async function fetchNationRoster(name) {
 function NLGroupCard({ gi, label, group, results, pool, poolByName, comp, lastComp, onCompChange, onCompReset, rosterFor, onLoadRoster, onTeam, onValidate, onClear, intlMatches, leagueAvg, rho, onOpenMatch, defOpen }) {
   const [open, setOpen] = useState(defOpen);
   const table = nlStandings(group, results, gi, poolByName);
-  const played = NL_ROUNDS.reduce((s, round, r) => s + round.filter(({ x, y }) => { const res = results[nlId(gi, r, x, y)]; return res && res.hg != null && res.ag != null; }).length, 0);
+  const fixtures = nlFixtures(gi, group);
+  const played = fixtures.filter((f) => { const res = results[f.id]; return res && res.hg != null && res.ag != null; }).length;
   const lineFactor = (name, t) => {
     const c = comp[name]; const man = c && (c.xi || c.formation || c.remanie);
     return compFactor(man ? c : (lastComp[name] || defaultComp(t)), rosterFor(name));
@@ -3074,28 +3127,28 @@ function NLGroupCard({ gi, label, group, results, pool, poolByName, comp, lastCo
     <div className="pf-card wc-group">
       <button className="wc-group-head" onClick={() => setOpen(!open)}>
         <span className="wc-glabel">Groupe {label}</span>
-        <span className="wc-gprog">{played}/12</span>
+        <span className="wc-gprog">{played}/{fixtures.length}</span>
         <ChevronDown size={16} className={open ? "pf-rot" : ""} />
       </button>
       {open && (<div className="wc-group-body">
         <table className="wc-st"><thead><tr><th>#</th><th>Équipe</th><th>J</th><th>Pts</th><th>+/-</th><th>BP</th><th className="lv-hide-sm">Forme</th></tr></thead>
           <tbody>{table.map((r, i) => {
             const t = poolByName[r.name];
-            return <tr key={r.name} className={"wc-row-" + (i === 0 ? "q" : "x")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{t ? t.f : "🏳️"}</span>{short(r.name)}{i === 0 && <span className="wc-qb">Q</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td><td className="lv-hide-sm">{r.seq && r.seq.length ? <FormPills form={r.seq.slice(-5)} /> : "—"}</td></tr>;
+            return <tr key={r.name} className={"wc-row-" + (i < 2 ? "q" : i === 2 ? "q3" : "r")}><td>{i + 1}</td><td className="wc-tn"><span className="wc-flag">{t ? t.f : "🏳️"}</span>{short(r.name)}{i < 2 ? <span className="wc-qb">Q</span> : i === 2 ? <span className="wc-qb wc-qb3">B</span> : <span className="wc-qb wc-qbr">R</span>}</td><td>{r.gp}</td><td className="wc-pts">{r.pts}</td><td>{r.gd > 0 ? "+" + r.gd : r.gd}</td><td>{r.gf}</td><td className="lv-hide-sm">{r.seq && r.seq.length ? <FormPills form={r.seq.slice(-5)} /> : "—"}</td></tr>;
           })}</tbody>
         </table>
         <div className="wc-edit">{[0, 1, 2, 3].map((s) => (
           <div key={s} className="wc-editrow"><span className="wc-flag">{(poolByName[group[s]] || {}).f || "🏳️"}</span>
             <select value={group[s]} onChange={(e) => onTeam(gi, s, e.target.value)}>{pool.map((t) => <option key={t.n} value={t.n}>{t.n}</option>)}</select>
           </div>))}</div>
-        <div className="wc-matches">{NL_ROUNDS.flatMap((round, r) => round.map(({ x, y }) => {
-          const id = nlId(gi, r, x, y);
-          const hn = group[x], an = group[y];
+        <div className="wc-matches">{fixtures.map((f) => {
+          const id = f.id;
+          const hn = f.h, an = f.a;
           const ta = poolByName[hn] || { n: hn, f: "🏳️" }, tb = poolByName[an] || { n: an, f: "🏳️" };
           const res = results[id] || {};
           const p = predictMatch(hn, an);
           return (<div key={id} className="wc-m">
-            <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(NL_ROUND_DATES[r])}</span><span className="wc-mchan">J{r + 1}</span></div>
+            <div className="wc-mmeta"><span className="wc-mdate">{formatFrDate(f.d)}</span><span className="wc-mchan">J{f.md}</span></div>
             <div className="wc-mline"><span className="wc-mt">{ta.f} {short(hn)}</span>
               <MatchScoreBox id={id} r={res} isLive={false} onValidate={onValidate} onClear={onClear} />
               <span className="wc-mt wc-r">{short(an)} {tb.f}</span></div>
@@ -3108,7 +3161,7 @@ function NLGroupCard({ gi, label, group, results, pool, poolByName, comp, lastCo
             <LineupPanel ta={{ n: hn, f: ta.f }} tb={{ n: an, f: tb.f }} compA={comp[hn]} compB={comp[an]} onCompChange={onCompChange} onCompReset={onCompReset} rosterA={rosterFor(hn)} rosterB={rosterFor(an)} liveA={null} liveB={null} prevA={lastComp[hn]} prevB={lastComp[an]} luState={null} onRefresh={() => onLoadRoster(hn, an)} defFormA={defaultFormation(poolByName[hn] || { att: 1, def: 1 })} defFormB={defaultFormation(poolByName[an] || { att: 1, def: 1 })} />
             {onOpenMatch && <button className="wc-detailsbtn" onClick={() => onOpenMatch(hn, an)} title="Ouvrir ce match dans l'onglet Match">🔍 Détails dans l'onglet Match</button>}
           </div>);
-        }))}</div>
+        })}</div>
       </div>)}
     </div>
   );
@@ -3160,7 +3213,21 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
   useEffect(() => { if (loaded) store.set("nl:results:v1", results); }, [results, loaded]);
   useEffect(() => { if (loaded) store.set("nl:comp:v1", comp); }, [comp, loaded]);
   useEffect(() => { if (loaded) store.set("nl:lastcomp:v1", lastComp); }, [lastComp, loaded]);
-  const pool = useMemo(() => intlPool(intlMatches), [intlMatches]);
+  // Les scores NL saisis (aucune source live gratuite ne couvre la Ligue des Nations)
+  // sont réinjectés dans le moteur au même titre que les résultats Mondial/Euro : mappés
+  // en noms anglais (adjustPoolWithIntl re-mappe EN->FR), ils alimentent forces, forme
+  // récente et confrontations directes. Ainsi les probas des journées suivantes évoluent
+  // à mesure qu'on remplit le calendrier.
+  const nlResultMatches = useMemo(() => {
+    const arr = [];
+    groups.forEach((g, gi) => nlFixtures(gi, g).forEach((f) => {
+      const r = results[f.id];
+      if (r && r.hg != null && r.ag != null) arr.push({ date: f.d, comp: "UNL", home: NAT_EN[f.h] || f.h, away: NAT_EN[f.a] || f.a, hg: r.hg, ag: r.ag });
+    }));
+    return arr;
+  }, [groups, results]);
+  const allIntl = useMemo(() => [...nlResultMatches, ...intlMatches], [nlResultMatches, intlMatches]);
+  const pool = useMemo(() => intlPool(allIntl), [allIntl]);
   const poolByName = useMemo(() => { const o = {}; pool.forEach((t) => { o[t.n] = t; }); return o; }, [pool]);
   const leagueAvg = NL_AVG, rho = LEAGUE_RHO.WC;
   const onCompChange = (name, patch) => setComp((p) => ({ ...p, [name]: { ...(p[name] || {}), ...patch } }));
@@ -3180,8 +3247,8 @@ function NationsLeagueTab({ intlMatches = [], onOpenMatch }) {
         <button className="wc-reset" onClick={reset} title="Réinitialiser"><RotateCcw size={15} /></button>
       </div>
       {view === "groups" ? (<>
-        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>). <b>Groupes éditables</b> — ajuste-les au tirage. Les <b>2 premiers</b> de chaque groupe filent en <b>quarts de finale</b> (puis Final Four) ; le 3e joue les barrages, le dernier est relégué en Ligue B.</div>
-        {groups.map((g, gi) => <NLGroupCard key={gi} gi={gi} label={NL_GROUP_LABELS[gi]} group={g} results={results} pool={pool} poolByName={poolByName} comp={comp} lastComp={lastComp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} onLoadRoster={onLoadRoster} onTeam={onTeam} onValidate={onValidate} onClear={onClear} intlMatches={intlMatches} leagueAvg={leagueAvg} rho={rho} onOpenMatch={onOpenMatch} defOpen={gi === 0} />)}
+        <div className="wc-hint">UEFA <b>Ligue des Nations</b> — Ligue A (4 groupes de 4, aller/retour sur 6 journées). Saisis les scores puis <b>valide avec ✓</b> : classements et pronostics se recalculent. Moteur identique au Mondial (Elo + rang FIFA + confrontations + <b>formation/compo</b>) ; les scores saisis alimentent forme et forces, donc les probas des journées suivantes évoluent. Calendrier officiel du <b>tirage UEFA 2026-27</b> (groupes éditables). Les <b>2 premiers</b> de chaque groupe filent en <b>quarts de finale</b> (puis Final Four) ; le 3e joue les barrages, le dernier est relégué en Ligue B.</div>
+        {groups.map((g, gi) => <NLGroupCard key={gi} gi={gi} label={NL_GROUP_LABELS[gi]} group={g} results={results} pool={pool} poolByName={poolByName} comp={comp} lastComp={lastComp} onCompChange={onCompChange} onCompReset={onCompReset} rosterFor={rosterFor} onLoadRoster={onLoadRoster} onTeam={onTeam} onValidate={onValidate} onClear={onClear} intlMatches={allIntl} leagueAvg={leagueAvg} rho={rho} onOpenMatch={onOpenMatch} defOpen={gi === 0} />)}
       </>) : (
         <NLFinals groups={groups} results={results} poolByName={poolByName} />
       )}
@@ -4496,8 +4563,10 @@ const CSS = `
 .wc-pts{color:var(--txt);font-weight:700;}
 .wc-row-q td{color:#dfeecf;}.wc-row-q .wc-pts{color:var(--lime);}
 .wc-row-q3 .wc-pts{color:var(--amber);}
+.wc-row-r td{color:#c9a3a3;}.wc-row-r .wc-pts{color:#e06666;}
 .wc-qb{font-family:'Saira Condensed';font-size:9px;font-weight:700;background:var(--lime);color:#0b0d10;border-radius:4px;padding:1px 4px;margin-left:3px;}
 .wc-qb3{background:var(--amber);}
+.wc-qbr{background:#e06666;color:#0b0d10;}
 .wc-edit{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;}
 .wc-editrow{display:flex;align-items:center;gap:5px;background:#0e1116;border:1px solid var(--line);border-radius:9px;padding:4px 7px;}
 .wc-editrow select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:var(--txt);font-size:12px;width:100%;outline:none;}

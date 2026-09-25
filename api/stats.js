@@ -15,7 +15,10 @@ export default async function handler(req, res) {
   const { source = "standings", league, home, away } = req.query;
   const token = process.env.FOOTBALLDATA_TOKEN;
   const H = { "X-Auth-Token": token || "" };
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Ce proxy porte des clés API secrètes à quota limité. Le frontend l'appelle en
+  // MÊME ORIGINE (/api/stats) : aucun en-tête CORS n'est requis. On n'autorise donc
+  // PAS "*" (qui laisserait n'importe quel site tiers consommer nos quotas depuis un
+  // navigateur). Pour un usage cross-origin légitime, remplacer par l'origine voulue.
   res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
   // football-data.org = 10 req/min en gratuit. Sur 429 (limite) / erreur amont /
   // données vides, on RACCOURCIT le cache pour ne pas figer un vide pendant 10 min.
@@ -378,10 +381,13 @@ export default async function handler(req, res) {
     /* ---- CONFRONTATIONS DIRECTES (H2H) ---- */
     if (source === "h2h") {
       if (!home || !away) return res.status(400).json({ error: "paramètres 'home' et 'away' requis" });
-      const r = await fetch("https://api.football-data.org/v4/teams/" + home + "/matches?status=FINISHED&limit=200", { headers: H });
+      // ID d'équipe = entier : garde-fou contre l'injection de chemin dans l'URL amont.
+      const homeId = parseInt(home, 10), awayId = parseInt(away, 10);
+      if (!(homeId > 0) || !(awayId > 0)) return res.status(400).json({ error: "'home' et 'away' doivent être des identifiants numériques" });
+      const r = await fetch("https://api.football-data.org/v4/teams/" + homeId + "/matches?status=FINISHED&limit=200", { headers: H });
       const j = await r.json();
       const meetings = (j.matches || [])
-        .filter((m) => String(m.homeTeam.id) === String(away) || String(m.awayTeam.id) === String(away))
+        .filter((m) => m.homeTeam.id === awayId || m.awayTeam.id === awayId)
         .sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate))
         .slice(0, 8)
         .map((m) => ({
@@ -543,10 +549,10 @@ export default async function handler(req, res) {
      * C1/C3 + coupes nationales). Sert à l'onglet Match : la forme récente et les
      * résultats européens (absents du classement du championnat) entrent dans le calcul. */
     if (source === "teammatches") {
-      const team = req.query.team;
-      if (!team) return res.status(400).json({ error: "paramètre 'team' requis" });
+      const teamId = parseInt(req.query.team, 10);
+      if (!(teamId > 0)) return res.status(400).json({ error: "paramètre 'team' (identifiant numérique) requis" });
       const limit = Math.min(40, Math.max(1, parseInt(req.query.limit, 10) || 14));
-      const r = await fetch("https://api.football-data.org/v4/teams/" + team + "/matches?status=FINISHED&limit=" + limit, { headers: H });
+      const r = await fetch("https://api.football-data.org/v4/teams/" + teamId + "/matches?status=FINISHED&limit=" + limit, { headers: H });
       if (!r.ok) { shortCache(); return res.status(r.status === 429 ? 429 : 502).json({ error: upstreamErr(r) }); }
       const j = await r.json();
       const matches = (j.matches || []).map((m) => ({
@@ -560,7 +566,7 @@ export default async function handler(req, res) {
       })).filter((m) => m.hg != null && m.ag != null)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
       if (!matches.length) shortCache();
-      return res.status(200).json({ source, team, count: matches.length, updated: new Date().toISOString(), matches });
+      return res.status(200).json({ source, team: teamId, count: matches.length, updated: new Date().toISOString(), matches });
     }
 
     /* ---- CLASSEMENT -> FORCES (défaut) ---- */
